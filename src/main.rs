@@ -1,6 +1,6 @@
 use crate::{
     ast::{parse_ast, parse_func_def},
-    token::tokenize,
+    token::tokenize, ir::App,
 };
 
 mod ast;
@@ -21,7 +21,7 @@ mod token;
 
 const SOURCE: &str = r#"
 func main(int a, int b) -> float {
-
+    int c = another(10 + 10);
 } 
 
 func another(int val) -> int {
@@ -38,7 +38,7 @@ fn main() {
     let ast = parse_ast(&tokens);
     println!("{ast:#?}");
 
-    let mut app = ir::App::new();
+    let mut app = App::new();
 
     app.get_declarations(&ast).expect("Couldn't parse function declarations");
     println!("{app:#?}");
