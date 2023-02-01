@@ -21,7 +21,7 @@ mod token;
 
 const SOURCE: &str = r#"
 func main(int a, int b) -> float {
-    int c = another(10 + 10);
+    int c = 0;
 } 
 
 func another(int val) -> int {

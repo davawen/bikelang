@@ -24,6 +24,30 @@ enum FunctionBody<'a> {
     Raw(&'a Vec<ast::Node>),
 }
 
+impl<'a> std::ops::Deref for FunctionBody<'a> {
+    type Target = Vec<Instruction>;
+
+    fn deref(&self) -> &Self::Target {
+        if let FunctionBody::Parsed(ins) = self {
+            ins
+        }
+        else {
+            panic!("Trying to use FunctionBody while it's not already parsed");
+        }
+    }
+}
+
+impl<'a> std::ops::DerefMut for FunctionBody<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        if let FunctionBody::Parsed(ins) = self {
+            ins
+        }
+        else {
+            panic!("Trying to use FunctionBody while it's not already parsed");
+        }
+    }
+}
+
 #[derive(Debug)]
 enum Instruction {
     VariableStore(usize, Value),
@@ -159,8 +183,8 @@ impl<'a> Function<'a> {
             instructions: FunctionBody::Raw(body),
         }))
     }
-
-    fn fold_node(ins: &mut Vec<Instruction>, vars: &mut IndexMap<String, Variable>, temporary_count: &mut i32, node: &ast::Node) -> Result<Value> {
+//ins: &mut Vec<Instruction>, vars: &mut IndexMap<String, Variable>
+    fn fold_node(&mut self, app: &App, temporary_count: &mut i32, node: &ast::Node) -> Result<Value> {
         match node {
             ast::Node::Expr { lhs, rhs, op } => match op {
                 token::Operation::Assignment => {
@@ -168,35 +192,35 @@ impl<'a> Function<'a> {
                     else { 
                         return Err(IrError::WrongNodeType("A variable name or definition", *lhs.clone()));
                     };
-                    let var = vars.get_index_of(var).ok_or(IrError::UknownVariable(var.clone()))?;
+                    let var = self.variables.get_index_of(var).ok_or(IrError::UknownVariable(var.clone()))?;
 
-                    let rhs = Self::fold_node(ins, vars, temporary_count, rhs)?;
-                    ins.push(Instruction::VariableStore(var, rhs));
+                    let rhs = self.fold_node(app, temporary_count, rhs)?;
+                    self.instructions.push(Instruction::VariableStore(var, rhs));
 
                     Ok(Value::NoValue)
                 }
                 &op => {
-                    let lhs = Self::fold_node(ins, vars, temporary_count, lhs)?;
-                    let rhs = Self::fold_node(ins, vars, temporary_count, rhs)?;
+                    let lhs = self.fold_node(app, temporary_count, lhs)?;
+                    let rhs = self.fold_node(app, temporary_count, rhs)?;
 
                     let temporary = format!("tmp{temporary_count}");
-                    let (temporary, _) = vars.insert_full(temporary, Variable { typename: "bruh".to_owned() });
+                    let (temporary, _) = self.variables.insert_full(temporary, Variable { typename: "bruh".to_owned() });
                     *temporary_count += 1;
 
-                    ins.push(Instruction::StoreIntrisic(temporary, Intrisic::from_op(op, lhs, rhs)?));
+                    self.instructions.push(Instruction::StoreIntrisic(temporary, Intrisic::from_op(op, lhs, rhs)?));
                     Ok(Value::VariableLoad(temporary))
                 },
             },
             ast::Node::Call { name, intrisic: false, parameter_list } => Ok(Value::Call {
                 func: name.clone(),
-                parameters: parameter_list.iter().map(|n| Self::fold_node(ins, vars, temporary_count, n)).collect::<Result<Vec<_>>>()?
+                parameters: parameter_list.iter().map(|n| self.fold_node(app, temporary_count, n)).collect::<Result<Vec<_>>>()?
             }),
             ast::Node::Call { name, intrisic: true, parameter_list } => {
-                ins.push(Instruction::Intrisic(Intrisic::from_node(name, parameter_list)?));
+                self.instructions.push(Instruction::Intrisic(Intrisic::from_node(name, parameter_list)?));
                 Ok(Value::NoValue)
             },
             ast::Node::Identifier(var) => Ok(
-                Value::VariableLoad(vars.get_index_of(var).ok_or(IrError::UknownVariable(var.clone()))?)
+                Value::VariableLoad(self.variables.get_index_of(var).ok_or(IrError::UknownVariable(var.clone()))?)
             ),
             &ast::Node::Number(n) => Ok(Value::Number(n)),
             ast::Node::StringLiteral(s) => Ok(Value::Literal(s.clone())),
@@ -205,17 +229,15 @@ impl<'a> Function<'a> {
     }
 
     /// Used to postpone the interpretation of the function's source until everything in the file is declared
-    pub fn integrate_body(&mut self) -> Result<()> {
+    pub fn integrate_body(&mut self, app: &App) -> Result<()> {
         let FunctionBody::Raw(body) = self.instructions else { Err(IrError::FunctionAlreadyParsed(self.name.clone()))? };
 
-        let mut ins = Vec::new();
+        self.instructions = FunctionBody::Parsed(Vec::new());
         let mut temporary = 0;
 
         for node in body {
-            Self::fold_node(&mut ins, &mut self.variables, &mut temporary, node).expect("Valid AST input");
+            self.fold_node(app,&mut temporary, node).expect("Valid AST input");
         }
-
-        self.instructions = FunctionBody::Parsed(ins);
 
         Ok(())
     }
@@ -240,8 +262,12 @@ impl<'a> App<'a> {
     }
 
     pub fn integrate_definitions(&mut self) -> Result<()> {
-        for f in self.functions.values_mut() {
-            f.integrate_body()?;
+        let keys = self.functions.keys().cloned().collect::<Vec<_>>();
+        for k in keys {
+            let mut f = self.functions.remove(&k).unwrap();
+            f.integrate_body(self)?;
+
+            self.functions.insert(k, f);
         }
 
         Ok(())
