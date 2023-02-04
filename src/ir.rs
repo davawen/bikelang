@@ -85,8 +85,6 @@ struct Variable {
 
 #[derive(Debug, Error)]
 pub enum IrError {
-    #[error("Wrong node type used, exepected {0}, got {1:?}")]
-    WrongNodeType(&'static str, ast::Node),
     #[error("Wrong intrisic used")]
     MalformedIntrisic,
     #[error("Intrisic {0} isn't known by the language")]
@@ -95,8 +93,6 @@ pub enum IrError {
     UknownVariable(String),
     #[error("Parsing function {0} again")]
     FunctionAlreadyParsed(String),
-    #[error("Redefinition of {0} {1}")]
-    Redefinition(&'static str, String)
 }
 
 pub type Result<T> = std::result::Result<T, IrError>;
@@ -243,22 +239,11 @@ impl<'a> Function<'a> {
     }
 }
 
-impl<'a> App<'a> {
+impl App {
     pub fn new() -> Self {
         App {
             functions: HashMap::new(),
         }
-    }
-
-    pub fn get_declarations(&mut self, root: &'a ast::Node) -> Result<()> {
-        let ast::Node::Block(root) = root else { Err(IrError::WrongNodeType("A list of top-level statements", root.clone()))? };
-
-        for statement in root.iter().flat_map(Function::get_declaration) {
-            let statement = statement?;
-            self.functions.insert(statement.name.clone(), statement);
-        }
-
-        Ok(())
     }
 
     pub fn integrate_definitions(&mut self) -> Result<()> {

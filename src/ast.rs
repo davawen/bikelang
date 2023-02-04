@@ -1,3 +1,6 @@
+use indexmap::IndexMap;
+use thiserror::Error;
+
 use crate::token::{Dir, Operation, Token};
 
 #[derive(Debug, Clone)]

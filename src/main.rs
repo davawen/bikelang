@@ -1,10 +1,12 @@
 use crate::{
     ast::{parse_ast, parse_func_def},
-    token::tokenize, ir::App,
+    token::tokenize,
 };
 
+mod utility;
 mod ast;
-mod ir;
+mod analysis;
+// mod ir;
 mod token;
 
 // fn parse(mut tokens: &[Token]) -> Node {
@@ -38,11 +40,11 @@ fn main() {
     let ast = parse_ast(&tokens);
     println!("{ast:#?}");
 
-    let mut app = App::new();
+    let mut app = analysis::App::new();
 
-    app.get_declarations(&ast).expect("Couldn't parse function declarations");
+    app.get_declarations(ast).expect("Couldn't parse function declarations");
     println!("{app:#?}");
 
-    app.integrate_definitions().expect("Couldn't parse function bodies");
-    println!("{app:#?}");
+    // app.integrate_definitions().expect("Couldn't parse function bodies");
+    // println!("{app:#?}");
 }
