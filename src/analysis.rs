@@ -123,7 +123,7 @@ impl FunctionBody {
                 }
                 else { app.get_type("void") }
             },
-            Node::Call { name, intrisic: true, .. } => {
+            Node::Intrisic(_intrisic) => {
                 Ok(app.get_type("void")?)
             }
             Node::Call { name, parameter_list, .. } => {

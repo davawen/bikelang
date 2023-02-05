@@ -16,9 +16,10 @@ pub trait Inspect where Self: Sized {
     type Error;
 
     fn my_inspect_err<F: FnOnce(&Self::Error)>(self, closure: F) -> Self;
+    fn log_err(self) -> Self;
 }
 
-impl<T, E> Inspect for Result<T, E> {
+impl<T, E: std::fmt::Display> Inspect for Result<T, E> {
     type Error = E;
 
     fn my_inspect_err<F: FnOnce(&Self::Error)>(self, closure: F) -> Self {
@@ -27,5 +28,9 @@ impl<T, E> Inspect for Result<T, E> {
         }
 
         self
+    } 
+
+    fn log_err(self) -> Self {
+        self.my_inspect_err(|e| eprintln!("{e}"))
     }
 }

@@ -85,10 +85,6 @@ struct Variable {
 
 #[derive(Debug, Error)]
 pub enum IrError {
-    #[error("Wrong intrisic used")]
-    MalformedIntrisic,
-    #[error("Intrisic {0} isn't known by the language")]
-    UknownInstric(String),
     #[error("Unknown variable {0} isn't defined anywhere in the function")]
     UknownVariable(String),
     #[error("Parsing function {0} again")]
