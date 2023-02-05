@@ -11,3 +11,21 @@ impl<T> PushIndex for Vec<T> {
         idx
     }
 }
+
+pub trait Inspect where Self: Sized {
+    type Error;
+
+    fn my_inspect_err<F: FnOnce(&Self::Error)>(self, closure: F) -> Self;
+}
+
+impl<T, E> Inspect for Result<T, E> {
+    type Error = E;
+
+    fn my_inspect_err<F: FnOnce(&Self::Error)>(self, closure: F) -> Self {
+        if let Err(e) = &self {
+            closure(e);
+        }
+
+        self
+    }
+}

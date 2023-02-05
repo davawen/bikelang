@@ -1,6 +1,6 @@
 use crate::{
     ast::{parse_ast, parse_func_def},
-    token::tokenize,
+    token::tokenize, utility::Inspect,
 };
 
 mod utility;
@@ -22,14 +22,11 @@ mod token;
 // }
 
 const SOURCE: &str = r#"
-func main(int a, int b) -> float {
-    int c = 0;
+func main(i32 a, i32 b) -> void {
+    a = another("hi!");
 } 
 
-func another(int val) -> int {
-    print#("Hello!");
-
-    0;
+func another(str val) -> i32 {
 }
 "#;
 
@@ -42,8 +39,10 @@ fn main() {
 
     let mut app = analysis::App::new();
 
-    app.get_declarations(ast).expect("Couldn't parse function declarations");
+    app.insert_declarations(ast).my_inspect_err(|e| eprintln!("{e}")).expect("Couldn't parse function declarations");
     println!("{app:#?}");
+
+    app.type_check().my_inspect_err(|e| eprintln!("{e}")).unwrap();
 
     // app.integrate_definitions().expect("Couldn't parse function bodies");
     // println!("{app:#?}");
