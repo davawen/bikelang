@@ -3,7 +3,7 @@ use indexmap::{IndexMap, indexmap};
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
-use crate::{ast::Node, utility::PushIndex, token::Operation};
+use crate::{ast::{Node, Intrisic}, utility::PushIndex, token::Operation};
 
 #[derive(Debug)]
 pub struct App {
@@ -48,7 +48,9 @@ pub enum AnalysisError {
     #[error("Unknown {0} {1}")]
     Unknown(&'static str, String),
     #[error("Expected type {1}, got {2}: {0}")]
-    MismatchedType(&'static str, String, String)
+    MismatchedType(&'static str, String, String),
+    #[error("Wrong number of arguments given to function {0}: expected {1}, got {2}.")]
+    WrongArgumentNumber(String, usize, usize)
 }
 
 pub type Result<T> = std::result::Result<T, AnalysisError>;
@@ -107,35 +109,60 @@ impl Function {
     }
 }
 
-impl FunctionBody {
-    fn get_type(&self, app: &App, node: &Node) -> Result<TypeIndex> {
-        match node {
+impl Node {
+    /// Returns the type associated with this node by recursively computing it
+    ///
+    /// * `app`: Global application state (functions and types)
+    /// * `definition`: Definition of the current function
+    fn get_type(&self, app: &App, definition: &Function) -> Result<TypeIndex> {
+        match self {
             Node::Number(_) => app.get_type("i32"),
             Node::StringLiteral(_) => app.get_type("str"),
             Node::Identifier(name) | Node::Definition { name, .. } => {
-                app.function_definitions[self.definition]
+                definition
                     .variables.get(name).copied()
                     .ok_or(AnalysisError::Unknown("variable", name.to_owned()))
             },
             Node::Block(nodes) => {
                 if let Some(node) = nodes.last() {
-                    self.get_type(app, node)
+                    node.get_type(app, definition)
                 }
                 else { app.get_type("void") }
             },
-            Node::Intrisic(_intrisic) => {
-                Ok(app.get_type("void")?)
+            Node::Intrisic(intrisic) => {
+                match intrisic {
+                    Intrisic::Asm(x) => {
+                        let x = x.get_type(app, definition)?;
+                        if x != app.get_type("str")? {
+                            return Err(AnalysisError::MismatchedType("Wrong intrisic type", "str".to_owned(), app.get_type_name(x).to_owned()));
+                        }
+                    },
+                    Intrisic::Print(args) => {
+                        for ty in args.iter().map(|node| node.get_type(app, definition)) {
+                            let ty = ty?;
+                            if ty != app.get_type("str")? && ty != app.get_type("i32")? {
+                                return Err(AnalysisError::MismatchedType("Print intrisic cannot format given type", "str or i32".to_owned(), app.get_type_name(ty).to_owned()));
+                            }
+                        }
+                    }
+                }
+
+                app.get_type("void")
             }
             Node::Call { name, parameter_list, .. } => {
                 let func = app.function_definitions.get(name)
                     .ok_or(AnalysisError::Unknown("function", name.clone()))?;
 
+                if func.arguments.len() != parameter_list.len() {
+                    return Err(AnalysisError::WrongArgumentNumber(name.clone(), func.arguments.len(), parameter_list.len()))
+                }
+
                 for (arg, param) in func.arguments.iter().copied().map(|a| func.variables[a]) // map argument index into type index
                     .zip(parameter_list.iter())
                 {
-                    let param = self.get_type(app, param)?;
+                    let param = param.get_type(app, definition)?;
                     if param != arg {
-                        return Err(AnalysisError::MismatchedType("wrong argument to function", app.get_type_name(arg).to_owned(), app.get_type_name(param).to_owned()))
+                        return Err(AnalysisError::MismatchedType("wrong argument type to function", app.get_type_name(arg).to_owned(), app.get_type_name(param).to_owned()))
                     }
                 }
 
@@ -145,8 +172,8 @@ impl FunctionBody {
                 if !matches!(**lhs, Node::Identifier(_) | Node::Definition { .. }) { 
                     return Err(AnalysisError::WrongNodeType("a variable definition", *lhs.clone())) 
                 }
-                let expected_type = self.get_type(app, &**lhs)?;
-                let rhs_type = self.get_type(app, &**rhs)?;
+                let expected_type = lhs.get_type(app, definition)?;
+                let rhs_type = rhs.get_type(app, definition)?;
 
                 if rhs_type == expected_type {
                     app.get_type("void")
@@ -157,8 +184,8 @@ impl FunctionBody {
             },
             Node::Expr { lhs, rhs, op: _ } => {
                 let i32_type = app.get_type("i32")?;
-                let lhs = self.get_type(app, &**lhs)?;
-                let rhs = self.get_type(app, &**rhs)?;
+                let lhs = lhs.get_type(app, definition)?;
+                let rhs = rhs.get_type(app, definition)?;
 
                 if lhs == i32_type && rhs == i32_type {
                     Ok(i32_type)
@@ -168,14 +195,16 @@ impl FunctionBody {
                 }
             },
             Node::FuncDef { .. } => {
-                Err(AnalysisError::WrongNodeType("something that isn't a function definition what the fuck", node.clone()))
+                Err(AnalysisError::WrongNodeType("something that isn't a function definition what the fuck", self.clone()))
             }
         }
     }
+}
 
+impl FunctionBody {
     fn type_check(&self, app: &App) -> Result<()> {
-        for line in self.iter() {
-            self.get_type(app, line)?;
+        for statement in self.iter() {
+            statement.get_type(app, &app.function_definitions[self.definition])?;
         }
         Ok(())
     }

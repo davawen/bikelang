@@ -77,8 +77,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                     '*' => Some(Token::Op(Operation::Mul)),
                     '/' => {
                         if let Some('/') = chars.peek() {
-                            // Comment
-                            chars.by_ref().skip_while(|&x| x != '\n').for_each(|_| ());
+                            chars.by_ref().skip_while(|&x| x != '\n').peekable().peek();
                             None
                         } else {
                             Some(Token::Op(Operation::Div))

@@ -35,7 +35,7 @@ pub enum Node {
 #[derive(Debug, Clone)]
 pub enum Intrisic {
     Asm(Box<Node>),
-    Print(Box<Node>)
+    Print(Vec<Node>)
 }
 
 #[derive(Debug, Error)]
@@ -44,8 +44,8 @@ pub enum ASTError {
     UnexpectedToken(Token),
     #[error("Expected token {0:?}")]
     ExpectedToken(Token),
-    #[error("Wrong intrisic used")]
-    MalformedIntrisic,
+    #[error("Malformed intrisic: {0}")]
+    MalformedIntrisic(&'static str),
     #[error("Intrisic {0} isn't defined in the language")]
     UknownInstric(String),
     #[error("Malformed expression")]
@@ -62,15 +62,15 @@ impl Intrisic {
                     Ok(Self::Asm(Box::new(s)))
                 }
                 else {
-                    Err(ASTError::MalformedIntrisic)
+                    Err(ASTError::MalformedIntrisic("no argument given to asm intrisic"))
                 }
             },
             "print" => {
-                if let Some(s) = parameters.into_iter().next() {
-                    Ok(Self::Print(Box::new(s)))
+                if parameters.len() > 0 {
+                    Ok(Self::Print(parameters))
                 }
                 else {
-                    Err(ASTError::MalformedIntrisic)
+                    Err(ASTError::MalformedIntrisic("no argument given to print intrisic"))
                 }
             }
             name => Err(ASTError::UknownInstric(name.to_owned()))
@@ -199,8 +199,18 @@ fn find_matching(tokens: &[Token], token: Token, included: bool) -> Option<usize
 ///
 /// * `inner_tokens`: Given tokens
 fn parse_parameter_list(inner_tokens: &[Token]) -> Result<Vec<Node>> {
+    let mut scope = 0;
+
     inner_tokens
-        .split(|t| matches!(t, Token::Comma))
+        .split(|t| {
+            match t {
+                Token::Paren(Dir::Left) => scope += 1,
+                Token::Paren(Dir::Right) => scope -= 1,
+                _ => ()
+            };
+
+            scope <= 0 && matches!(t, Token::Comma)
+        })
         .filter(|t| !t.is_empty())
         .map(parse_expr)
         .collect()
