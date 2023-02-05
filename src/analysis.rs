@@ -79,16 +79,34 @@ impl Function {
 
         let Node::Block(body) = *body else { return Err(AnalysisError::WrongNodeType("A function body", *body)) };
 
-        for expr in &body {
-            if let Node::Expr { lhs, .. } = expr {
-                if let Node::Definition { name, typename } = &**lhs {
+        fn get_variable_definitions(app: &App, variables: &mut IndexMap<String, usize>, node: &Node) -> Result<()> {
+            match node {
+                Node::Definition { name, typename } => {
                     if !variables.contains_key(name) {
                         variables.insert(name.clone(), app.get_type(typename)?);
                     } else {
                         return Err(AnalysisError::Redefinition("variable", name.clone()));
                     }
-                }
-            }
+                },
+                Node::Expr { lhs, rhs, .. } => {
+                    get_variable_definitions(app, variables, lhs)?;
+                    get_variable_definitions(app, variables, rhs)?;
+                },
+                Node::Statement(x) => {
+                    get_variable_definitions(app, variables, x)?;
+                },
+                Node::Block(body) => {
+                    for expr in body {
+                        get_variable_definitions(app, variables, expr)?;
+                    }
+                },
+                _ => ()
+            };
+            Ok(())
+        }
+
+        for expr in &body {
+            get_variable_definitions(app, &mut variables, expr)?;
         }
 
         let body = app.function_bodies.push_idx(FunctionBody{ body, definition: 0 });
@@ -194,6 +212,10 @@ impl Node {
                     Err(AnalysisError::MismatchedType("math operations only apply to numbers", app.get_type_name(lhs).to_owned(), app.get_type_name(rhs).to_owned()))
                 }
             },
+            Node::Statement( inner ) => {
+                inner.get_type(app, definition)?;
+                app.get_type("void")
+            }
             Node::FuncDef { .. } => {
                 Err(AnalysisError::WrongNodeType("something that isn't a function definition what the fuck", self.clone()))
             }

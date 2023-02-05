@@ -23,11 +23,14 @@ mod token;
 
 const SOURCE: &str = r#"
 func main(i32 a, i32 b) -> void {
-    another("hi!");
+    a = {
+        i32 c = 10 * b;
+        c + 12
+    };
 } 
 
 func another(str val) -> i32 {
-   print#(main(1, 1), 10, "bruh");
+    0
 }
 "#;
 

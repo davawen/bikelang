@@ -21,6 +21,7 @@ pub enum Node {
         rhs: Box<Node>,
         op: Operation,
     },
+    Statement(Box<Node>),
     Intrisic(Intrisic),
     Call {
         name: String,
@@ -134,7 +135,13 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
 
             let inner_expression = parse_expr(&following[..matching])?;
             parse_following_or_return_inner(following, matching, inner_expression)
-        }
+        },
+        [Token::Brace(Dir::Left), following @ ..] => {
+            let matching = find_matching(following, Token::Brace(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
+
+            let block = parse_block(&following[..matching])?;
+            parse_following_or_return_inner(following, matching, block)
+        },
         [_lhs, Token::Op(op), _rhs] => Ok(Node::Expr {
             lhs: Box::new(parse_expr(&tokens[..1])?),
             rhs: Box::new(parse_expr(&tokens[2..])?),
@@ -156,17 +163,6 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
                 Err(ASTError::InvalidExpression)
             }
         }
-    }
-}
-
-fn parse_line(mut tokens: &[Token]) -> Option<Result<Node>> {
-    assert!(matches!(tokens.last().unwrap(), Token::Semicolon));
-    tokens = &tokens[..(tokens.len() - 1)];
-
-    if !tokens.is_empty() {
-        Some(parse_expr(tokens))
-    } else {
-        None
     }
 }
 
@@ -217,20 +213,32 @@ fn parse_parameter_list(inner_tokens: &[Token]) -> Result<Vec<Node>> {
 }
 
 fn parse_block(mut tokens: &[Token]) -> Result<Node> {
-    assert!(matches!(tokens[0], Token::Brace(Dir::Left)));
-    assert!(matches!(tokens.last().unwrap(), Token::Brace(Dir::Right)));
-
-    tokens = &tokens[1..(tokens.len() - 1)];
     let mut out = Vec::new();
 
     // println!("aaa");
     let mut start_idx = 0;
-    for (idx, token) in tokens.iter().enumerate() {
+    let mut it = tokens.iter().enumerate();
+    while let Some((idx, token)) = it.next() {
         if let Token::Semicolon = token {
-            if let Some(node) = parse_line(&tokens[start_idx..=idx]) {
-                out.push(node?);
+            let line = &tokens[start_idx..idx];
+            if line.len() > 0 {
+                out.push(Node::Statement(Box::new(parse_expr(line)?)));
             }
             start_idx = idx + 1;
+        }
+        else if idx == tokens.len()-1 {
+            let line = &tokens[start_idx..=idx];
+            if line.len() > 0 {
+                out.push(parse_expr(line)?);
+            }
+        }
+        else if let Token::Brace(Dir::Left) = token {
+            if let Some(end_idx) = find_matching(&tokens[idx..], Token::Brace(Dir::Left), true) {
+                // NOTE: end_idx is relative to tokens[idx..]
+                it.by_ref().skip(end_idx - 1).next(); // - 1 to account for the next() call
+            } else {
+                return Err(ASTError::ExpectedToken(Token::Brace(Dir::Right)));
+            }
         }
     }
 
@@ -260,10 +268,15 @@ pub fn parse_func_def(mut tokens: &[Token]) -> Result<Option<(Node, &[Token])>> 
             "void".to_owned()
         };
 
-        let body = if let Some(end_idx) = find_matching(tokens, Token::Brace(Dir::Left), true) {
-            let body = parse_block(&tokens[..=end_idx]);
+        let Token::Brace(Dir::Left) = tokens[0] else {
+            return Err(ASTError::ExpectedToken(Token::Brace(Dir::Left)));
+        };
+        tokens = &tokens[1..];
+
+        let body = if let Some(end_idx) = find_matching(tokens, Token::Brace(Dir::Left), false) {
+            let body = parse_block(&tokens[..end_idx])?;
             tokens = &tokens[(end_idx + 1)..];
-            body?
+            body
         } else {
             // panic!("No brace after function definition")
             return Err(ASTError::ExpectedToken(Token::Brace(Dir::Right)));
