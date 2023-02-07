@@ -23,8 +23,8 @@ pub struct Function {
 pub struct FunctionBody {
     #[deref]
     #[deref_mut]
-    body: Vec<Node>,
-    definition: FunctionIndex
+    pub body: Vec<Node>,
+    pub definition: FunctionIndex
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,7 +159,7 @@ impl Node {
     ///
     /// * `app`: Global application state (functions and types)
     /// * `definition`: Definition of the current function
-    fn get_type(&self, app: &App, definition: &Function) -> Result<Type> {
+    pub fn get_type(&self, app: &App, definition: &Function) -> Result<Type> {
         match self {
             Node::Number(_) => Ok(Type::Integer32),
             Node::StringLiteral(_) => Ok(Type::String),
@@ -177,9 +177,8 @@ impl Node {
             Node::Intrisic(intrisic) => {
                 match intrisic {
                     Intrisic::Asm(x) => {
-                        let x = x.get_type(app, definition)?;
-                        if !matches!(x, Type::String) {
-                            return Err(AnalysisError::MismatchedType("asm intrisic uses a string", Type::String, x));
+                        if !matches!(&**x, Node::StringLiteral(_)) {
+                            return Err(AnalysisError::WrongNodeType("a compile-time string literal", (**x).clone()));
                         }
                     },
                     Intrisic::Print(args) => {

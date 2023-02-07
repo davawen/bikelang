@@ -6,7 +6,7 @@ use crate::{
 mod utility;
 mod ast;
 mod analysis;
-// mod ir;
+mod ir;
 mod token;
 
 // fn parse(mut tokens: &[Token]) -> Node {
@@ -27,9 +27,14 @@ func main(i32 a, i32 b) -> void {
         i32 c = 10 * b;
         c + 10
     };
+
+    print#("The number is: ", a);
 } 
 
 func another(str val) -> i32 {
+    val = "Hiya!";
+    print#(val);
+
     0
 }
 "#;
@@ -47,6 +52,9 @@ fn main() {
     println!("{app:#?}");
 
     app.type_check().log_err().unwrap();
+
+    let ir = ir::Ir::from_app(app);
+    println!("{ir:#?}");
 
     // app.integrate_definitions().expect("Couldn't parse function bodies");
     // println!("{app:#?}");
