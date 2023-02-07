@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use indexmap::{IndexMap, indexmap};
+use indexmap::IndexMap;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
@@ -7,17 +6,17 @@ use crate::{ast::{Node, Intrisic}, utility::PushIndex, token::Operation};
 
 #[derive(Debug)]
 pub struct App {
-    function_definitions: IndexMap<String, Function>,
-    function_bodies: Vec<FunctionBody>,
-    types: IndexMap<String, Type>,
+    pub function_definitions: IndexMap<String, Function>,
+    pub function_bodies: Vec<FunctionBody>,
+    // pub types: IndexMap<String, Type>,
 }
 
 #[derive(Debug)]
 pub struct Function {
-    return_type: TypeIndex,
-    variables: IndexMap<String, TypeIndex>,
-    arguments: Vec<VariableIndex>,
-    body: FunctionBodyIndex,
+    pub return_type: Type,
+    pub variables: IndexMap<String, Type>,
+    pub arguments: Vec<VariableIndex>,
+    pub body: FunctionBodyIndex,
 }
 
 #[derive(Debug, Deref, DerefMut)]
@@ -28,16 +27,20 @@ pub struct FunctionBody {
     definition: FunctionIndex
 }
 
-#[derive(Debug, Clone)]
-struct Type {
-    /// Size of the type in bytes
-    size: u32
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Type {
+    Integer32,
+    Float32,
+    String,
+    Void,
+    // For later :)
+    // Struct(TypeIndex)
 }
 
 pub type FunctionIndex = usize;
 pub type FunctionBodyIndex = usize;
 pub type VariableIndex = usize;
-pub type TypeIndex = usize;
+// pub type TypeIndex = usize;
 
 #[derive(Debug, Clone, Error)]
 pub enum AnalysisError {
@@ -47,13 +50,37 @@ pub enum AnalysisError {
     Redefinition(&'static str, String),
     #[error("Unknown {0} {1}")]
     Unknown(&'static str, String),
-    #[error("Expected type {1}, got {2}: {0}")]
-    MismatchedType(&'static str, String, String),
+    #[error("Expected type {1:?}, got {2:?}: {0}")]
+    MismatchedType(&'static str, Type, Type),
     #[error("Wrong number of arguments given to function {0}: expected {1}, got {2}.")]
     WrongArgumentNumber(String, usize, usize)
 }
 
 pub type Result<T> = std::result::Result<T, AnalysisError>;
+
+impl Type {
+    /// Size of the type in bytes
+    pub fn size(&self) -> u32 {
+        use Type::*;
+        match self {
+            Integer32 => 4,
+            Float32 => 4,
+            String => 8,
+            Void => 0
+        }
+    }
+
+    pub fn from_str(name: &str) -> Result<Self> {
+        use Type::*;
+        match name {
+            "i32" => Ok(Integer32),
+            "f32" => Ok(Float32),
+            "str" => Ok(String),
+            "void" => Ok(Void),
+            _ => Err(AnalysisError::Unknown("type", name.to_owned()))
+        }
+    }
+}
 
 impl Function {
     fn is_declaration(node: &Node) -> bool {
@@ -65,7 +92,7 @@ impl Function {
         let Node::FuncDef { name, return_type, parameter_list, body } = node
             else { return Err(AnalysisError::WrongNodeType("No function definition given...", node)) };
 
-        let return_type = app.get_type(&return_type)?;
+        let return_type = Type::from_str(&return_type)?;
 
         let mut variables = IndexMap::new();
         let mut arguments = Vec::new();
@@ -73,17 +100,17 @@ impl Function {
         for v in parameter_list {
             let Node::Definition { name, typename } = v else { return Err(AnalysisError::WrongNodeType("An argument definition", v)) };
 
-            let (idx, _) = variables.insert_full(name, app.get_type(&typename)?);
+            let (idx, _) = variables.insert_full(name, Type::from_str(&typename)?);
             arguments.push(idx);
         }
 
         let Node::Block(body) = *body else { return Err(AnalysisError::WrongNodeType("A function body", *body)) };
 
-        fn get_variable_definitions(app: &App, variables: &mut IndexMap<String, usize>, node: &Node) -> Result<()> {
+        fn get_variable_definitions(app: &App, variables: &mut IndexMap<String, Type>, node: &Node) -> Result<()> {
             match node {
                 Node::Definition { name, typename } => {
                     if !variables.contains_key(name) {
-                        variables.insert(name.clone(), app.get_type(typename)?);
+                        variables.insert(name.clone(), Type::from_str(typename)?);
                     } else {
                         return Err(AnalysisError::Redefinition("variable", name.clone()));
                     }
@@ -132,10 +159,10 @@ impl Node {
     ///
     /// * `app`: Global application state (functions and types)
     /// * `definition`: Definition of the current function
-    fn get_type(&self, app: &App, definition: &Function) -> Result<TypeIndex> {
+    fn get_type(&self, app: &App, definition: &Function) -> Result<Type> {
         match self {
-            Node::Number(_) => app.get_type("i32"),
-            Node::StringLiteral(_) => app.get_type("str"),
+            Node::Number(_) => Ok(Type::Integer32),
+            Node::StringLiteral(_) => Ok(Type::String),
             Node::Identifier(name) | Node::Definition { name, .. } => {
                 definition
                     .variables.get(name).copied()
@@ -145,27 +172,27 @@ impl Node {
                 if let Some(node) = nodes.last() {
                     node.get_type(app, definition)
                 }
-                else { app.get_type("void") }
+                else { Ok(Type::Void) }
             },
             Node::Intrisic(intrisic) => {
                 match intrisic {
                     Intrisic::Asm(x) => {
                         let x = x.get_type(app, definition)?;
-                        if x != app.get_type("str")? {
-                            return Err(AnalysisError::MismatchedType("Wrong intrisic type", "str".to_owned(), app.get_type_name(x).to_owned()));
+                        if !matches!(x, Type::String) {
+                            return Err(AnalysisError::MismatchedType("asm intrisic uses a string", Type::String, x));
                         }
                     },
                     Intrisic::Print(args) => {
                         for ty in args.iter().map(|node| node.get_type(app, definition)) {
                             let ty = ty?;
-                            if ty != app.get_type("str")? && ty != app.get_type("i32")? {
-                                return Err(AnalysisError::MismatchedType("Print intrisic cannot format given type", "str or i32".to_owned(), app.get_type_name(ty).to_owned()));
+                            if !matches!(ty, Type::String | Type::Integer32) {
+                                return Err(AnalysisError::MismatchedType("print intrisic cannot format the given type (expect str or i32)", Type::String, ty));
                             }
                         }
                     }
                 }
 
-                app.get_type("void")
+                Ok(Type::Void)
             }
             Node::Call { name, parameter_list, .. } => {
                 let func = app.function_definitions.get(name)
@@ -175,12 +202,12 @@ impl Node {
                     return Err(AnalysisError::WrongArgumentNumber(name.clone(), func.arguments.len(), parameter_list.len()))
                 }
 
-                for (arg, param) in func.arguments.iter().copied().map(|a| func.variables[a]) // map argument index into type index
+                for (param, arg) in func.arguments.iter().map(|&a| func.variables[a]) // map argument index into type index
                     .zip(parameter_list.iter())
                 {
-                    let param = param.get_type(app, definition)?;
-                    if param != arg {
-                        return Err(AnalysisError::MismatchedType("wrong argument type to function", app.get_type_name(arg).to_owned(), app.get_type_name(param).to_owned()))
+                    let arg = arg.get_type(app, definition)?;
+                    if arg != param {
+                        return Err(AnalysisError::MismatchedType("wrong argument type to function", param, arg));
                     }
                 }
 
@@ -194,27 +221,31 @@ impl Node {
                 let rhs_type = rhs.get_type(app, definition)?;
 
                 if rhs_type == expected_type {
-                    app.get_type("void")
+                    Ok(Type::Void)
                 }
                 else {
-                    Err(AnalysisError::MismatchedType("cannot assign value to variable", app.get_type_name(expected_type).to_owned(), app.get_type_name(rhs_type).to_owned()))
+                    Err(AnalysisError::MismatchedType("cannot assign value to variable", expected_type, rhs_type))
                 }
             },
             Node::Expr { lhs, rhs, op: _ } => {
-                let i32_type = app.get_type("i32")?;
                 let lhs = lhs.get_type(app, definition)?;
                 let rhs = rhs.get_type(app, definition)?;
 
-                if lhs == i32_type && rhs == i32_type {
-                    Ok(i32_type)
+                if lhs == Type::Integer32 {
+                    if rhs == Type::Integer32 {
+                        Ok(lhs)
+                    }
+                    else {
+                        Err(AnalysisError::MismatchedType("math operations only apply to numbers", Type::Integer32, rhs))
+                    }
                 }
                 else {
-                    Err(AnalysisError::MismatchedType("math operations only apply to numbers", app.get_type_name(lhs).to_owned(), app.get_type_name(rhs).to_owned()))
+                    Err(AnalysisError::MismatchedType("math operations only apply to numbers", Type::Integer32, lhs))
                 }
             },
             Node::Statement( inner ) => {
                 inner.get_type(app, definition)?;
-                app.get_type("void")
+                Ok(Type::Void)
             }
             Node::FuncDef { .. } => {
                 Err(AnalysisError::WrongNodeType("something that isn't a function definition what the fuck", self.clone()))
@@ -233,25 +264,19 @@ impl FunctionBody {
 }
 
 impl App {
-    fn get_type(&self, name: &str) -> Result<TypeIndex> {
-        self.types.get_index_of(name).ok_or(AnalysisError::Unknown("type", name.to_owned()))
-    }
-
-    /// Assume the type index exists in the map
-    fn get_type_name(&self, idx: TypeIndex) -> &str {
-        self.types.get_index(idx).unwrap().0
-    }
+    // fn get_type(&self, name: &str) -> Result<TypeIndex> {
+    //     self.types.get_index_of(name).ok_or(AnalysisError::Unknown("type", name.to_owned()))
+    // }
+    //
+    // /// Assume the type index exists in the map
+    // fn get_type_name(&self, idx: TypeIndex) -> &str {
+    //     self.types.get_index(idx).unwrap().0
+    // }
 
     pub fn new() -> Self {
         Self {
             function_definitions: IndexMap::new(),
             function_bodies: Vec::new(),
-            types: indexmap!{
-                "i32".to_owned() => Type { size: 4 },
-                "f32".to_owned() => Type { size: 4 },
-                "str".to_owned() => Type { size: 8 },
-                "void".to_owned() => Type { size: 0 }
-            },
         }
     }
 

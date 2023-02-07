@@ -25,7 +25,7 @@ const SOURCE: &str = r#"
 func main(i32 a, i32 b) -> void {
     a = {
         i32 c = 10 * b;
-        c + 12
+        c + 10
     };
 } 
 
