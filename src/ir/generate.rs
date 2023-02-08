@@ -38,7 +38,7 @@ impl Function {
                 let rhs = self.fold_node(ir, app, func, *rhs);
 
                 // Operations should be between i32s only
-                let temporary = self.variables.push_idx(Type { size: 4 });
+                let temporary = self.add_variable(4);
 
                 self.instructions.push(Instruction::StoreIntrisic(temporary, Intrisic::from_op(op, lhs, rhs)));
                 Value::VariableLoad(temporary)
@@ -93,12 +93,23 @@ impl Function {
         }
     }
 
+    fn add_variable(&mut self, size: u32) -> VariableIndex {
+        let total_offset = self.variables.last().map_or(0, |v| v.total_offset) + size;
+        self.variables.push_idx(VariableOffset { size, total_offset })
+    }
+
     fn new(name: String, definition: &analysis::Function) -> Self {
-        Self {
+        let mut this = Self {
             name,
-            variables: definition.variables.values().map(|&x| x.into()).collect(),
+            variables: Vec::new(),
             instructions: Vec::new()
+        };
+
+        for v in definition.variables.values() {
+            this.add_variable(v.size());
         }
+
+        this
     }
 
     fn generate_ir(&mut self, ir: &mut Ir, app: &analysis::App, definition: &analysis::Function, body: analysis::FunctionBody) {

@@ -3,6 +3,7 @@ use thiserror::Error;
 use crate::{ast, token::{self, Operation}, analysis, utility::PushIndex};
 
 mod generate;
+mod asm;
 
 #[derive(Debug)]
 pub struct Ir {
@@ -13,7 +14,7 @@ pub struct Ir {
 #[derive(Debug)]
 struct Function {
     name: String,
-    variables: Vec<Type>,
+    variables: Vec<VariableOffset>,
     instructions: Vec<Instruction>,
 }
 
@@ -49,16 +50,11 @@ enum Value {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Type {
-    pub size: u32
-}
-
-impl From<analysis::Type> for Type {
-    fn from(value: analysis::Type) -> Self {
-        Self {
-            size: value.size()
-        }
-    }
+pub struct VariableOffset {
+    /// The size of this variable in bytes
+    pub size: u32,
+    /// The total offset of this variable from the stack base
+    pub total_offset: u32
 }
 
 type FunctionIndex = usize;

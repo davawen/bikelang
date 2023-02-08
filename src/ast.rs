@@ -17,9 +17,9 @@ pub enum Node {
         name: String,
     },
     Expr {
-        lhs: Box<Node>,
-        rhs: Box<Node>,
         op: Operation,
+        lhs: Box<Node>,
+        rhs: Box<Node>
     },
     Statement(Box<Node>),
     Intrisic(Intrisic),
