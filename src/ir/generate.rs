@@ -1,16 +1,14 @@
-use indexmap::IndexMap;
-
 use crate::{ast, token::{self, Operation}, analysis, utility::PushIndex};
 
 use super::*;
 
-impl Intrisic {
+impl Arithmetic {
     fn from_op(op: token::Operation, lhs: Value, rhs: Value) -> Self {
         match op {
-            Operation::Add => Intrisic::Add(lhs, rhs),
-            Operation::Sub => Intrisic::Sub(lhs, rhs),
-            Operation::Mul => Intrisic::Mul(lhs, rhs),
-            Operation::Div => Intrisic::Div(lhs, rhs),
+            Operation::Add => Arithmetic::Add(lhs, rhs),
+            Operation::Sub => Arithmetic::Sub(lhs, rhs),
+            Operation::Mul => Arithmetic::Mul(lhs, rhs),
+            Operation::Div => Arithmetic::Div(lhs, rhs),
             _ => unreachable!()
         }
     }
@@ -40,7 +38,7 @@ impl Function {
                 // Operations should be between i32s only
                 let temporary = self.add_variable(4);
 
-                self.instructions.push(Instruction::StoreIntrisic(temporary, Intrisic::from_op(op, lhs, rhs)));
+                self.instructions.push(Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs)));
                 Value::VariableLoad(temporary)
             },
             ast::Node::Call { name, parameter_list } => Value::Call {

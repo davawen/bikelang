@@ -1,7 +1,5 @@
 use thiserror::Error;
 
-use crate::{ast, token::{self, Operation}, analysis, utility::PushIndex};
-
 mod generate;
 mod asm;
 
@@ -21,20 +19,24 @@ struct Function {
 #[derive(Debug)]
 enum Instruction {
     VariableStore(VariableIndex, Value),
-    StoreIntrisic(VariableIndex, Intrisic),
+    StoreOperation(VariableIndex, Arithmetic),
     Intrisic(Intrisic),
     Nop
+}
+
+#[derive(Debug)]
+enum Arithmetic {
+    Add(Value, Value),
+    Sub(Value, Value),
+    Mul(Value, Value),
+    Div(Value, Value)
 }
 
 #[derive(Debug)]
 enum Intrisic {
     Asm(Value),
     PrintNumber(Value),
-    PrintString(Value),
-    Add(Value, Value),
-    Sub(Value, Value),
-    Mul(Value, Value),
-    Div(Value, Value),
+    PrintString(Value)
 }
 
 #[derive(Debug)]

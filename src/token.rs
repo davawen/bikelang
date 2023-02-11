@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 #[derive(Clone, Copy, Debug, Default)]
 pub enum Dir {
     #[default]
@@ -25,7 +27,26 @@ pub enum Token {
 }
 
 pub fn get_string_literal(source: &mut impl Iterator<Item = char>) -> String {
-    source.take_while(|&c| c != '"').collect()
+    let mut out = String::new();
+
+    while let Some(c) = source.next()  {
+        let c = match c {
+            '\\' => { 
+                match source.next().unwrap() {
+                    'n' => '\n',
+                    '\\' => '\\',
+                    '"' => '"',
+                    b => panic!("Uknown escape sequence: \\{b}")
+                } 
+            },
+            '"' => break,
+            _ => c
+        };
+
+        out.push(c);
+    }
+
+    out
 }
 
 pub fn tokenize(source: &str) -> Vec<Token> {

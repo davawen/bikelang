@@ -1,3 +1,5 @@
+use std::fs;
+
 use crate::{
     ast::parse_ast,
     token::tokenize, utility::Inspect,
@@ -24,7 +26,9 @@ mod token;
 const SOURCE: &str = r#"
 func main(i32 a, i32 b) -> void {
     a = 12;
-    i32 c = a + 10;
+    i32 c = a * 10;
+
+    print#("a * 10 = ", c, "\n");
 } 
 "#;
     // print#("The number is: ", a);
@@ -37,21 +41,44 @@ func another(str val) -> i32 {
     0
 }*/
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tokens = tokenize(SOURCE);
-    println!("{tokens:#?}");
+    // println!("{tokens:#?}");
 
-    let ast = parse_ast(&tokens).log_err().unwrap();
+    let ast = parse_ast(&tokens).log_err()?;
     println!("{ast:#?}");
 
     let mut app = analysis::App::new();
 
-    app.insert_declarations(ast).log_err().expect("Couldn't parse function declarations");
+    app.insert_declarations(ast).log_err()?;
     // println!("{app:#?}");
 
-    app.type_check().log_err().unwrap();
+    app.type_check().log_err()?;
 
     let ir = ir::Ir::from_app(app);
     println!("{ir:#?}");
     println!("{}", ir.generate_asm());
+
+    fs::write("out.asm", ir.generate_full())?;
+
+    println!("$ nasm -f elf64 out.asm");
+    let out = std::process::Command::new("nasm")
+        .args(["-f", "elf64", "out.asm"])
+        .output().expect("failed to assemble");
+
+    if !out.status.success() {
+        println!("error: {}", String::from_utf8(out.stderr)?);
+    }
+
+    println!("$ ld out.o");
+    let out = std::process::Command::new("ld")
+        .arg("out.o")
+        .output().expect("failed to link");
+
+    if !out.status.success() {
+        println!("error: {}", String::from_utf8(out.stderr)?);
+    }
+
+    println!("Compilation successful!");
+    Ok(())
 }

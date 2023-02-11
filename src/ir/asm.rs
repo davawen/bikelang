@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 use super::*;
 
 fn variable_operand(func: &Function, idx: VariableIndex) -> String {
@@ -5,15 +7,16 @@ fn variable_operand(func: &Function, idx: VariableIndex) -> String {
     format!(
     "{} [rbp-{}]",
     match var.size {
-        1 => "byte",
-        2 => "word",
-        4 => "dword",
-        8 => "qword",
+        1 => "BYTE",
+        2 => "WORD",
+        4 => "DWORD",
+        8 => "QWORD",
         _ => unreachable!("Invalid word size")
     },
     var.total_offset)
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone, Copy)]
 enum Register {
     Rax,
@@ -86,33 +89,78 @@ impl Value {
         match self {
             Value::Number(_) => 4,
             Value::VariableLoad(idx) => func.variables[*idx].size,
-            _ => unreachable!("value blegh: {self:#?}")
+            _ => todo!("value blegh: {self:#?}")
         }
     }
 }
 
 // Intrisics will put their value into rax
-impl Intrisic {
+impl Arithmetic {
     /// Returns the code the intrisic will do and the output register that was used
-    fn generate_asm(&self, func: &Function) -> (String, &'static str) {
+    fn generate_asm(&self, func: &Function) -> (&'static str, String) {
+        use Arithmetic::*;
         match self {
-            Intrisic::Add(lhs, rhs) => {
-                let l_reg = Register::Rax.as_str(lhs.size(func));
-                let r_reg = Register::R8.as_str(lhs.size(func));
+            Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) => {
+                let rax = Register::Rax.as_str(lhs.size(func));
 
-                (format!(
-                    "mov {l_reg}, {}\nmov {r_reg}, {}\nadd {l_reg}, {r_reg}\n",
+                let op = match self {
+                    Add(..) => "add",
+                    Sub(..) => "sub",
+                    Mul(..) => "imul",
+                    _ => unreachable!()
+                };
+
+                (rax, format!(
+                    "mov {rax}, {}\n{op} {rax}, {}\n",
                     lhs.as_operand(func),
                     rhs.as_operand(func)
-                ), l_reg)
+                ))
             },
-            _ => unreachable!("Intrisics not all set lol: {self:#?}")
+            Div(lhs, rhs) => {
+                let rax = Register::Rax.as_str(lhs.size(func));
+
+                // Signed dived of rdx:rax = make sure rdx is null
+                (rax, format!(
+                    "mov {rax}, {}\nxor rdx, rdx\nidivq {}",
+                    lhs.as_operand(func),
+                    rhs.as_operand(func)
+                ))
+            },
+        }
+    }
+}
+
+impl Intrisic {
+    fn generate_asm(&self, ir: &Ir, func: &Function) -> String {
+        use Intrisic::*;
+        match self {
+            Asm(Value::Literal(inner)) => {
+                ir.literals[*inner].clone()
+            }
+            PrintNumber(v) => {
+                let rax = Register::Rax.as_str(v.size(func));
+                format!("mov {rax}, {}\ncall __builtin_print_number4", v.as_operand(func))
+            },
+            PrintString(Value::Literal(idx)) => {
+                let literal = &ir.literals[*idx];
+                format!("
+mov rax, 1
+mov rdi, 1
+mov rsi, user_str{}
+mov rdx, {}
+syscall
+                    ",
+                    idx,
+                    literal.len()
+                )
+            }
+            _ => todo!("Intrisics not all set lol: {self:#?}")
         }
     }
 }
 
 impl Instruction {
-    fn generate_asm(&self, func: &Function) -> String {
+    fn generate_asm(&self, ir: &Ir, func: &Function) -> String {
         match self {
             Instruction::VariableStore(idx, value) => {
                 if let Value::VariableLoad(_) = value {
@@ -122,12 +170,12 @@ impl Instruction {
                     format!("mov {}, {}\n", variable_operand(func, *idx), value.as_operand(func))
                 }
             },
-            Instruction::StoreIntrisic(idx, intrisic) => {
-                let (code, reg) = intrisic.generate_asm(func);
+            Instruction::StoreOperation(idx, op) => {
+                let (reg, code) = op.generate_asm(func);
                 format!("{code}\nmov {}, {reg}\n", variable_operand(func, *idx))
             },
             Instruction::Intrisic(i) => {
-                i.generate_asm(func).0
+                i.generate_asm(ir, func)
             }
             _ => unreachable!("instructions not all set lmao: {self:#?}")
         }
@@ -135,7 +183,7 @@ impl Instruction {
 }
 
 impl Function {
-    fn generate_asm(&self) -> String {
+    fn generate_asm(&self, ir: &Ir) -> String {
         let mut out = format!(
 "{}:
     ; enter stack frame
@@ -148,7 +196,7 @@ impl Function {
         );
 
         for ins in &self.instructions {
-            let ins = ins.generate_asm(self);
+            let ins = ins.generate_asm(ir, self);
             for x in ins.split('\n') {
                 out.push_str("    ");
                 out.push_str(x.trim());
@@ -170,14 +218,94 @@ impl Function {
 }
 
 impl Ir {
+    pub fn builtins(&self) -> String {
+        let mut out = String::new();
+
+        for size in [1, 2, 4, 8] {
+            let rax = Register::Rax.as_str(size);
+            let rdx = Register::Rdx.as_str(size);
+            let r8 = Register::R8.as_str(size);
+            out.push_str(&format!("
+__builtin_print_number{size}:
+    mov rcx, 0
+    .loop:
+        xor {rdx}, {rdx} ; nullify rdx
+
+        mov {r8}, 10
+        idiv {r8} ; divide assembled register {rdx}:{rax} by {r8}
+        ; quotient goes in {rax}, remainder goes in {rdx}
+
+        add {rdx}, 0x30 ; offset remainder to ASCII '0'
+
+        ; push printable remainder to stack
+        sub rsp, 1
+        mov BYTE [rsp], dl ; ASCII characters are one byte wide, so we only want that
+
+        ; continue until remaining number is 0
+        inc rcx
+        cmp rax, 0
+        jnz .loop
+
+    push rcx ; save rcx for cleanup
+
+    ; the stack grows downwards, so the characters pushed in reverse order are now in the good order
+    lea rsi, [rsp+8] 
+    mov rdx, rcx
+    mov rax, 1
+    mov rdi, 1
+    syscall
+
+    pop rcx
+    add rsp, rcx ; cleanup
+    ret
+"));
+        }
+
+        out
+    }
+
     pub fn generate_asm(&self) -> String {
         let mut out = String::new();
 
         for func in &self.functions {
-            out.push_str(&func.generate_asm());
+            out.push_str(&func.generate_asm(self));
             out.push('\n');
         }
 
         out
+    }
+
+    pub fn generate_full(&self) -> String {
+        let mut data = String::new();
+        for (idx, literal) in self.literals.iter().enumerate() {
+            data.push_str(&format!(
+                "user_str{}: db {}\n",
+                idx,
+                literal.as_bytes().iter().join(", ")
+            ))
+        }
+
+        format!(
+            "
+global _start
+section .text
+; builtin functions
+{}
+; user program:
+{}
+_start:
+    call main
+
+    mov rax, 60
+    xor rdi, rdi
+    syscall ; sys_exit
+
+section .data
+{}
+",
+            self.builtins(),
+            self.generate_asm(),
+            data
+        )
     }
 }
