@@ -23,6 +23,10 @@ pub enum Node {
         condition: Box<Node>,
         body: Box<Node>
     },
+    Loop {
+        body: Box<Node>
+    },
+    Break,
     Intrisic(Intrisic),
     Statement(Box<Node>),
     Block(Vec<Node>),
@@ -67,7 +71,7 @@ impl Intrisic {
                 else {
                     Err(ASTError::MalformedIntrisic("no argument given to asm intrisic"))
                 }
-            },
+            }
             "print" => {
                 if !parameters.is_empty() {
                     Ok(Self::Print(parameters))
@@ -131,7 +135,7 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
                 };
 
             parse_following_or_return_inner(following, matching, inner_expression)
-        },
+        }
         [Token::Keyword(Keyword::If), following @ ..] => {
             let (open_body, _) = following.iter().enumerate().find(|(_, token)| matches!(token, Token::Brace(Dir::Left)))
                 .ok_or(ASTError::ExpectedToken(Token::Brace(Dir::Left)))?;
@@ -140,19 +144,23 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
                 condition: Box::new(parse_expr(&following[..open_body])?),
                 body: Box::new(parse_expr(&following[open_body..])?)
             })
-        },
+        }
+        [Token::Keyword(Keyword::Loop), following @ ..] => {
+            Ok(Node::Loop { body: Box::new(parse_expr(following)?) })
+        }
+        [Token::Keyword(Keyword::Break)] => Ok(Node::Break),
         [Token::Paren(Dir::Left), following @ ..] => {
             let matching = find_matching(following, Token::Paren(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
 
             let inner_expression = parse_expr(&following[..matching])?;
             parse_following_or_return_inner(following, matching, inner_expression)
-        },
+        }
         [Token::Brace(Dir::Left), following @ ..] => {
             let matching = find_matching(following, Token::Brace(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
 
             let block = parse_block(&following[..matching])?;
             parse_following_or_return_inner(following, matching, block)
-        },
+        }
         [_lhs, Token::Op(op), _rhs] => Ok(Node::Expr {
             lhs: Box::new(parse_expr(&tokens[..1])?),
             rhs: Box::new(parse_expr(&tokens[2..])?),
@@ -253,19 +261,21 @@ fn parse_block(tokens: &[Token]) -> Result<Node> {
             }
             start_idx = idx + 1;
         }
-        else if idx == tokens.len()-1 {
-            let line = &tokens[start_idx..=idx];
-            if !line.is_empty() {
-                out.push(parse_expr(line)?);
-            }
-        }
-        else if let Token::Brace(Dir::Left) = token {
+        else if let Token::Brace(Dir::Left) = token { // skip underlyinh scopes
             if let Some(end_idx) = find_matching(&tokens[idx..], Token::Brace(Dir::Left), true) {
                 // NOTE: end_idx is relative to tokens[idx..]
                 it.by_ref().nth(end_idx - 1);
             } else {
                 return Err(ASTError::ExpectedToken(Token::Brace(Dir::Right)));
             }
+        }
+    }
+
+    // Get last expression
+    if start_idx < tokens.len() {
+        let line = &tokens[start_idx..];
+        if !line.is_empty() {
+            out.push(parse_expr(line)?);
         }
     }
 

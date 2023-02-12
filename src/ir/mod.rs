@@ -24,8 +24,7 @@ enum Instruction {
     StoreComparison(VariableIndex, Comparison),
     Label(LabelIndex),
     Jump(LabelIndex, Comparison),
-    Intrisic(Intrisic),
-    Nop
+    Intrisic(Intrisic)
 }
 
 #[derive(Debug)]

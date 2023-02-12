@@ -148,6 +148,21 @@ impl Comparison {
         format!("mov {rax}, {}\n{comparison}", left.as_operand(func))
     }
 
+    fn as_store(&self) -> &'static str {
+        use Comparison::*;
+        match self {
+            NotZero(..) => "setnz",
+            Zero(..) => "setz",
+            Eq(..) => "sete",
+            Neq(..) => "setne",
+            Gt(..) => "setg",
+            Ge(..) => "setge",
+            Lt(..) => "setl",
+            Le(..) => "setle",
+            Unconditional | Never => unreachable!()
+        }
+    }
+
     fn as_jump(&self) -> &'static str {
         use Comparison::*;
         match self {
@@ -209,6 +224,11 @@ impl Instruction {
                 let (reg, code) = op.generate_asm(func);
                 format!("{code}mov {}, {reg}\n", variable_operand(func, *idx))
             },
+            Instruction::StoreComparison(idx, comp) => {
+                let comparison = comp.generate_asm(func);
+                let store = comp.as_store();
+                format!("{comparison}\n{store} {}\n", variable_operand(func, *idx))
+            }
             Instruction::Label(label_idx) => {
                 format!(".label{label_idx}")
             }

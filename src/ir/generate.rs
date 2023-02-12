@@ -62,19 +62,20 @@ impl Function {
                 self.instructions.push(Instruction::VariableStore(var, rhs));
 
                 Value::NoValue
-            },
+            }
             ast::Node::Expr { lhs, rhs, op } => {
                 let lhs = self.fold_node(ir, app, func, *lhs);
                 let rhs = self.fold_node(ir, app, func, *rhs);
 
-                // Operations should be between i32s only
-                let temporary = self.add_variable(4);
+                let temporary;
 
                 let ins = match op {
                     op if op.is_arithmetic() => {
+                        temporary = self.add_variable(4);
                         Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs))
                     },
                     op if op.is_comparison() => {
+                        temporary = self.add_variable(1);
                         Instruction::StoreComparison(temporary, Comparison::from_op(op, lhs, rhs))
                     },
                     _ => unreachable!()
@@ -82,7 +83,7 @@ impl Function {
                 
                 self.instructions.push(ins);
                 Value::VariableLoad(temporary)
-            },
+            }
             ast::Node::Call { name, parameter_list } => Value::Call {
                 func: app.function_definitions.get_index_of(&name).unwrap(),
                 parameters: parameter_list.into_iter().map(|n| self.fold_node(ir, app, func, n)).collect()
@@ -108,7 +109,7 @@ impl Function {
                 }
                 // self.instructions.push(Instruction::Intrisic(Intrisic::from_node(name, parameter_list)?));
                 Value::NoValue
-            },
+            }
             ast::Node::If { condition, body } => {
                 let idx = self.add_label();
                 let jump = if let ast::Node::Expr { op, lhs, rhs } = *condition {
@@ -127,6 +128,19 @@ impl Function {
                 
                 Value::NoValue
             }
+            ast::Node::Loop { body } => {
+                let loop_start = self.add_label();
+                let loop_end = self.add_label();
+
+                self.instructions.push(Instruction::Label(loop_start));
+                self.fold_node(ir, app, func, *body);
+
+                self.instructions.push(Instruction::Jump(loop_start, Comparison::Unconditional));
+                self.instructions.push(Instruction::Label(loop_end));
+
+
+                Value::NoValue
+            }
             ast::Node::Block(nodes) => {
                 let mut it = nodes.into_iter().peekable();
                 while let Some(node) = it.next() {
@@ -139,7 +153,7 @@ impl Function {
                 }
 
                 Value::NoValue
-            },
+            }
             ast::Node::Statement(inner) => {
                 self.fold_node(ir, app, func, *inner);
                 Value::NoValue

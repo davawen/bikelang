@@ -258,7 +258,12 @@ impl Node {
                 }
 
                 body.get_type(app, definition)
-            }
+            },
+            Node::Loop { body } => {
+                body.get_type(app, definition)?;
+                Ok(Type::Void)
+            },
+            Node::Break => Ok(Type::Void),
             Node::Block(nodes) => {
                 let mut nodes = nodes.iter().peekable();
                 while let Some(node) = nodes.next() {

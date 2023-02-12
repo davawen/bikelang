@@ -25,10 +25,24 @@ mod token;
 
 const SOURCE: &str = r#"
 func main() -> void {
-    i32 a = 8;
-    if a+2 == 9 {
-        print#("HELLO");
-    };
+    i32 idx = 0;
+    loop {
+        if idx < 50 {
+            print#("Small number: ", idx, "\n");
+        };
+        if idx >= 50 {
+            if idx < 100 {
+                print#("Medium Number: ", idx, "\n");
+            }
+        };
+        if idx >= 100 {
+            print#("Big number: ", idx, "\n")
+        };
+        if idx >= 150 {
+            asm#("jmp .label1")
+        };
+        idx = idx + 3;
+    }
 } 
 "#;
     // print#("The number is: ", a);
