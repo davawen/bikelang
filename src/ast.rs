@@ -1,8 +1,6 @@
-use indexmap::IndexMap;
-use itertools::Itertools;
 use thiserror::Error;
 
-use crate::token::{Dir, Operation, Token};
+use crate::token::{Dir, Operation, Token, Keyword};
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -12,25 +10,29 @@ pub enum Node {
         return_type: String,
         body: Box<Node>,
     },
-    Definition {
-        typename: String,
+    Call {
         name: String,
+        parameter_list: Vec<Node>,
     },
     Expr {
         op: Operation,
         lhs: Box<Node>,
         rhs: Box<Node>
     },
-    Statement(Box<Node>),
-    Intrisic(Intrisic),
-    Call {
-        name: String,
-        parameter_list: Vec<Node>,
+    If {
+        condition: Box<Node>,
+        body: Box<Node>
     },
+    Intrisic(Intrisic),
+    Statement(Box<Node>),
     Block(Vec<Node>),
     Number(i32),
     StringLiteral(String),
     Identifier(String),
+    Definition {
+        typename: String,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +69,7 @@ impl Intrisic {
                 }
             },
             "print" => {
-                if parameters.len() > 0 {
+                if !parameters.is_empty() {
                     Ok(Self::Print(parameters))
                 }
                 else {
@@ -103,6 +105,11 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
     match tokens {
         [Token::Number(num)] => Ok(Node::Number(*num)),
         [Token::StringLiteral(s)] => Ok(Node::StringLiteral(s.clone())),
+        [Token::Word(name)] => Ok(Node::Identifier(name.clone())),
+        [Token::Word(typename), Token::Word(name)] => Ok(Node::Definition {
+            typename: typename.clone(),
+            name: name.clone(),
+        }),
         [Token::Word(name), h @ Token::Paren(Dir::Left), following @ ..] | 
         [Token::Word(name), h @ Token::Hash, Token::Paren(Dir::Left), following @ ..] => {
             let matching = find_matching(following, Token::Paren(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
@@ -124,12 +131,16 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
                 };
 
             parse_following_or_return_inner(following, matching, inner_expression)
-        }
-        [Token::Word(name)] => Ok(Node::Identifier(name.clone())),
-        [Token::Word(typename), Token::Word(name)] => Ok(Node::Definition {
-            typename: typename.clone(),
-            name: name.clone(),
-        }),
+        },
+        [Token::Keyword(Keyword::If), following @ ..] => {
+            let (open_body, _) = following.iter().enumerate().find(|(_, token)| matches!(token, Token::Brace(Dir::Left)))
+                .ok_or(ASTError::ExpectedToken(Token::Brace(Dir::Left)))?;
+
+            Ok(Node::If {
+                condition: Box::new(parse_expr(&following[..open_body])?),
+                body: Box::new(parse_expr(&following[open_body..])?)
+            })
+        },
         [Token::Paren(Dir::Left), following @ ..] => {
             let matching = find_matching(following, Token::Paren(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
 
@@ -148,12 +159,28 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
             op: *op,
         }),
         tokens => {
+            let mut scope = 0;
+
+            // Get the operation with the highest precedence not in any parenthesises
             let op = tokens
                 .iter()
                 .enumerate()
-                .find(|(_, token)| matches!(token, Token::Op(_)));
+                .flat_map(|(idx, token)| {
+                    match token {
+                        Token::Paren(Dir::Left) => scope += 1,
+                        Token::Paren(Dir::Right) => scope -= 1,
+                        Token::Op(op) if scope == 0 => return Some((idx, op)),
+                        _ => ()
+                    };
 
-            if let Some((idx, Token::Op(op))) = op {
+                    None
+                }
+                )
+                .max_by(|a, b| a.1.precedence().cmp(&b.1.precedence()));
+
+            if let Some((idx, op)) = op {
+                // println!("Out of {tokens:?},\nthe biggest operation is {op:?}");
+
                 Ok(Node::Expr {
                     lhs: Box::new(parse_expr(&tokens[0..idx])?),
                     rhs: Box::new(parse_expr(&tokens[(idx + 1)..])?),
@@ -212,7 +239,7 @@ fn parse_parameter_list(inner_tokens: &[Token]) -> Result<Vec<Node>> {
         .collect()
 }
 
-fn parse_block(mut tokens: &[Token]) -> Result<Node> {
+fn parse_block(tokens: &[Token]) -> Result<Node> {
     let mut out = Vec::new();
 
     // println!("aaa");
@@ -221,21 +248,21 @@ fn parse_block(mut tokens: &[Token]) -> Result<Node> {
     while let Some((idx, token)) = it.next() {
         if let Token::Semicolon = token {
             let line = &tokens[start_idx..idx];
-            if line.len() > 0 {
+            if !line.is_empty() {
                 out.push(Node::Statement(Box::new(parse_expr(line)?)));
             }
             start_idx = idx + 1;
         }
         else if idx == tokens.len()-1 {
             let line = &tokens[start_idx..=idx];
-            if line.len() > 0 {
+            if !line.is_empty() {
                 out.push(parse_expr(line)?);
             }
         }
         else if let Token::Brace(Dir::Left) = token {
             if let Some(end_idx) = find_matching(&tokens[idx..], Token::Brace(Dir::Left), true) {
                 // NOTE: end_idx is relative to tokens[idx..]
-                it.by_ref().skip(end_idx - 1).next(); // - 1 to account for the next() call
+                it.by_ref().nth(end_idx - 1);
             } else {
                 return Err(ASTError::ExpectedToken(Token::Brace(Dir::Right)));
             }
@@ -246,7 +273,7 @@ fn parse_block(mut tokens: &[Token]) -> Result<Node> {
 }
 
 pub fn parse_func_def(mut tokens: &[Token]) -> Result<Option<(Node, &[Token])>> {
-    if let (Token::Func, Token::Word(name)) = (&tokens[0], &tokens[1]) {
+    if let (Token::Keyword(Keyword::Func), Token::Word(name)) = (&tokens[0], &tokens[1]) {
         tokens = &tokens[2..];
 
         // println!("{tokens:#?}");

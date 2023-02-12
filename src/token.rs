@@ -1,5 +1,3 @@
-use itertools::Itertools;
-
 #[derive(Clone, Copy, Debug, Default)]
 pub enum Dir {
     #[default]
@@ -7,9 +5,9 @@ pub enum Dir {
     Right,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum Token {
-    Func,
+    Keyword(Keyword),
     Paren(Dir),
     Brace(Dir),
     Semicolon,
@@ -24,6 +22,59 @@ pub enum Token {
     StringLiteral(String),
 
     Eof,
+}
+
+#[derive(Debug, Clone)]
+pub enum Keyword {
+    Func,
+    If,
+    Loop,
+    Break
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Operation {
+    Assignment,
+
+    Equals,
+    NotEquals,
+    Greater,
+    GreaterOrEquals,
+    Lesser,
+    LesserOrEquals,
+
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl Operation {
+    pub fn precedence(&self) -> u32 {
+        use Operation::*;
+        match self {
+            Mul | Div => 1,
+            Add | Sub => 2,
+            Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => 3,
+            Assignment => 4
+        }
+    }
+
+    pub fn is_comparison(&self) -> bool {
+        use Operation::*;
+        matches!(self, Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals)
+    }
+
+    pub fn is_arithmetic(&self) -> bool {
+        use Operation::*;
+        matches!(self, Add | Sub | Mul | Div)
+    }
+}
+
+impl From<Keyword> for Token {
+    fn from(value: Keyword) -> Self {
+        Token::Keyword(value)
+    }
 }
 
 pub fn get_string_literal(source: &mut impl Iterator<Item = char>) -> String {
@@ -65,7 +116,10 @@ pub fn tokenize(source: &str) -> Vec<Token> {
             _ => {
                 let word_token = match word.as_str() {
                     "" => None,
-                    "func" => Some(Token::Func),
+                    "func" => Some(Keyword::Func.into()),
+                    "if" => Some(Keyword::If.into()),
+                    "loop" => Some(Keyword::Loop.into()),
+                    "break" => Some(Keyword::Break.into()),
                     _ => match word.parse::<i32>() {
                         Ok(num) => Some(Token::Number(num)),
                         Err(_) => Some(Token::Word(word)),
@@ -93,7 +147,35 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                             Some(Token::Op(Operation::Sub))
                         }
                     },
-                    '=' => Some(Token::Op(Operation::Assignment)),
+                    '=' => {
+                        if let Some('=') = chars.peek() {
+                            chars.next();
+                            Some(Token::Op(Operation::Equals))
+                        } else {
+                            Some(Token::Op(Operation::Assignment))
+                        }
+                    },
+                    '!' => {
+                        if let Some('=') = chars.peek() {
+                            chars.next();
+                            Some(Token::Op(Operation::NotEquals))
+                        }
+                        else { None }
+                    },
+                    '>' => {
+                        if let Some('=') = chars.peek() {
+                            chars.next();
+                            Some(Token::Op(Operation::GreaterOrEquals))
+                        }
+                        else { Some(Token::Op(Operation::Greater)) }
+                    },
+                    '<' => {
+                        if let Some('=') = chars.peek() {
+                            chars.next();
+                            Some(Token::Op(Operation::LesserOrEquals))
+                        }
+                        else { Some(Token::Op(Operation::Lesser)) }
+                    },
                     '+' => Some(Token::Op(Operation::Add)),
                     '*' => Some(Token::Op(Operation::Mul)),
                     '/' => {
@@ -103,7 +185,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                         } else {
                             Some(Token::Op(Operation::Div))
                         }
-                    }
+                    },
                     _ => None,
                 }
             }
@@ -117,13 +199,4 @@ pub fn tokenize(source: &str) -> Vec<Token> {
     out.push(Token::Eof);
 
     out
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Operation {
-    Assignment,
-    Add,
-    Sub,
-    Mul,
-    Div,
 }

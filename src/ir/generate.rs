@@ -3,13 +3,45 @@ use crate::{ast, token::{self, Operation}, analysis, utility::PushIndex};
 use super::*;
 
 impl Arithmetic {
-    fn from_op(op: token::Operation, lhs: Value, rhs: Value) -> Self {
+    fn from_op(op: Operation, lhs: Value, rhs: Value) -> Self {
+        use Operation::*;
         match op {
-            Operation::Add => Arithmetic::Add(lhs, rhs),
-            Operation::Sub => Arithmetic::Sub(lhs, rhs),
-            Operation::Mul => Arithmetic::Mul(lhs, rhs),
-            Operation::Div => Arithmetic::Div(lhs, rhs),
+            Add => Arithmetic::Add(lhs, rhs),
+            Sub => Arithmetic::Sub(lhs, rhs),
+            Mul => Arithmetic::Mul(lhs, rhs),
+            Div => Arithmetic::Div(lhs, rhs),
             _ => unreachable!()
+        }
+    }
+}
+
+impl Comparison { 
+    fn from_op(op: Operation, lhs: Value, rhs: Value) -> Self {
+        use Operation::*;
+        match op {
+            Equals => Comparison::Eq(lhs, rhs),
+            NotEquals => Comparison::Neq(lhs, rhs),
+            Greater => Comparison::Gt(lhs, rhs),
+            GreaterOrEquals => Comparison::Ge(lhs, rhs),
+            Lesser => Comparison::Lt(lhs, rhs),
+            LesserOrEquals => Comparison::Le(lhs, rhs),
+            _ => unreachable!("Operation {op:?} cannot be converted to a jump")
+        }
+    }
+
+    fn inverse(self) -> Self {
+        use Comparison::*;
+        match self {
+            Unconditional => Never,
+            Never => Unconditional,
+            NotZero(v) => Zero(v),
+            Zero(v) => NotZero(v),
+            Eq(l, r) => Neq(l, r),
+            Neq(l, r) => Eq(l, r),
+            Gt(l, r) => Le(l, r),
+            Ge(l, r) => Lt(l, r),
+            Lt(l, r) => Ge(l, r),
+            Le(l, r) => Gt(l, r)
         }
     }
 }
@@ -38,7 +70,17 @@ impl Function {
                 // Operations should be between i32s only
                 let temporary = self.add_variable(4);
 
-                self.instructions.push(Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs)));
+                let ins = match op {
+                    op if op.is_arithmetic() => {
+                        Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs))
+                    },
+                    op if op.is_comparison() => {
+                        Instruction::StoreComparison(temporary, Comparison::from_op(op, lhs, rhs))
+                    },
+                    _ => unreachable!()
+                };
+                
+                self.instructions.push(ins);
                 Value::VariableLoad(temporary)
             },
             ast::Node::Call { name, parameter_list } => Value::Call {
@@ -67,6 +109,24 @@ impl Function {
                 // self.instructions.push(Instruction::Intrisic(Intrisic::from_node(name, parameter_list)?));
                 Value::NoValue
             },
+            ast::Node::If { condition, body } => {
+                let idx = self.add_label();
+                let jump = if let ast::Node::Expr { op, lhs, rhs } = *condition {
+                    let lhs = self.fold_node(ir, app, func, *lhs);
+                    let rhs = self.fold_node(ir, app, func, *rhs);
+                    Comparison::from_op(op, lhs, rhs).inverse() // Skip the function's body if the condition is NOT true
+                } else {
+                    let value = self.fold_node(ir, app, func, *condition);
+                    Comparison::NotZero(value).inverse()
+                };
+
+                self.instructions.push(Instruction::Jump(idx, jump));
+
+                self.fold_node(ir, app, func, *body);
+                self.instructions.push(Instruction::Label(idx));
+                
+                Value::NoValue
+            }
             ast::Node::Block(nodes) => {
                 let mut it = nodes.into_iter().peekable();
                 while let Some(node) = it.next() {
@@ -96,11 +156,18 @@ impl Function {
         self.variables.push_idx(VariableOffset { size, total_offset })
     }
 
+    fn add_label(&mut self) -> LabelIndex {
+        let idx = self.label_num;
+        self.label_num += 1;
+        idx
+    }
+
     fn new(name: String, definition: &analysis::Function) -> Self {
         let mut this = Self {
             name,
             variables: Vec::new(),
-            instructions: Vec::new()
+            instructions: Vec::new(),
+            label_num: 0
         };
 
         for v in definition.variables.values() {

@@ -31,6 +31,7 @@ pub struct FunctionBody {
 pub enum Type {
     Integer32,
     Float32,
+    Boolean,
     String,
     Void,
     // For later :)
@@ -65,6 +66,7 @@ impl Type {
         match self {
             Integer32 => 4,
             Float32 => 4,
+            Boolean => 1,
             String => 8,
             Void => 0
         }
@@ -75,6 +77,7 @@ impl Type {
         match name {
             "i32" => Ok(Integer32),
             "f32" => Ok(Float32),
+            "bool" => Ok(Boolean),
             "str" => Ok(String),
             "void" => Ok(Void),
             _ => Err(AnalysisError::Unknown("type", name.to_owned()))
@@ -127,6 +130,9 @@ impl Function {
                         get_variable_definitions(app, variables, expr)?;
                     }
                 },
+                Node::If { body, .. } => {
+                    get_variable_definitions(app, variables, body)?;
+                }
                 _ => ()
             };
             Ok(())
@@ -167,12 +173,6 @@ impl Node {
                 definition
                     .variables.get(name).copied()
                     .ok_or(AnalysisError::Unknown("variable", name.to_owned()))
-            },
-            Node::Block(nodes) => {
-                if let Some(node) = nodes.last() {
-                    node.get_type(app, definition)
-                }
-                else { Ok(Type::Void) }
             },
             Node::Intrisic(intrisic) => {
                 match intrisic {
@@ -226,21 +226,48 @@ impl Node {
                     Err(AnalysisError::MismatchedType("cannot assign value to variable", expected_type, rhs_type))
                 }
             },
-            Node::Expr { lhs, rhs, op: _ } => {
+            Node::Expr { lhs, rhs, op } => {
                 let lhs = lhs.get_type(app, definition)?;
                 let rhs = rhs.get_type(app, definition)?;
 
-                if lhs == Type::Integer32 {
-                    if rhs == Type::Integer32 {
-                        Ok(lhs)
-                    }
-                    else {
-                        Err(AnalysisError::MismatchedType("math operations only apply to numbers", Type::Integer32, rhs))
-                    }
+                use Operation::*;
+                match op {
+                    Add | Sub | Div | Mul => if lhs == Type::Integer32 {
+                        if rhs == Type::Integer32 {
+                            Ok(lhs)
+                        } else {
+                            Err(AnalysisError::MismatchedType("math operations only apply to numbers", Type::Integer32, rhs))
+                        }
+                    } else {
+                        Err(AnalysisError::MismatchedType("math operations only apply to numbers", Type::Integer32, lhs))
+                    },
+                    Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => if lhs == rhs {
+                        Ok(Type::Boolean)
+                    } else {
+                        Err(AnalysisError::MismatchedType("cannot compare different types", lhs, rhs))
+                    },
+                    _ => unreachable!()
                 }
-                else {
-                    Err(AnalysisError::MismatchedType("math operations only apply to numbers", Type::Integer32, lhs))
+                
+            },
+            Node::If { condition, body } => {
+                let condition = condition.get_type(app, definition)?;
+
+                if condition != Type::Boolean {
+                    return Err(AnalysisError::MismatchedType("if statement condition needs to be boolean", Type::Boolean, condition));
                 }
+
+                body.get_type(app, definition)
+            }
+            Node::Block(nodes) => {
+                let mut nodes = nodes.iter().peekable();
+                while let Some(node) = nodes.next() {
+                    if nodes.peek().is_none() {
+                        return node.get_type(app, definition);
+                    }
+                    node.get_type(app, definition)?;
+                }
+                Ok(Type::Void) 
             },
             Node::Statement( inner ) => {
                 inner.get_type(app, definition)?;

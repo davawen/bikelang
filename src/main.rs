@@ -24,11 +24,11 @@ mod token;
 // }
 
 const SOURCE: &str = r#"
-func main(i32 a, i32 b) -> void {
-    a = 12;
-    i32 c = a * 10;
-
-    print#("a * 10 = ", c, "\n");
+func main() -> void {
+    i32 a = 8;
+    if a+2 == 9 {
+        print#("HELLO");
+    };
 } 
 "#;
     // print#("The number is: ", a);
@@ -43,7 +43,7 @@ func another(str val) -> i32 {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tokens = tokenize(SOURCE);
-    // println!("{tokens:#?}");
+    println!("{tokens:#?}");
 
     let ast = parse_ast(&tokens).log_err()?;
     println!("{ast:#?}");

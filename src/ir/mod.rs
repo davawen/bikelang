@@ -14,14 +14,32 @@ struct Function {
     name: String,
     variables: Vec<VariableOffset>,
     instructions: Vec<Instruction>,
+    label_num: usize
 }
 
 #[derive(Debug)]
 enum Instruction {
     VariableStore(VariableIndex, Value),
     StoreOperation(VariableIndex, Arithmetic),
+    StoreComparison(VariableIndex, Comparison),
+    Label(LabelIndex),
+    Jump(LabelIndex, Comparison),
     Intrisic(Intrisic),
     Nop
+}
+
+#[derive(Debug)]
+enum Comparison {
+    Unconditional,
+    Never,
+    NotZero(Value),
+    Zero(Value),
+    Eq(Value, Value),
+    Neq(Value, Value),
+    Gt(Value, Value),
+    Ge(Value, Value),
+    Lt(Value, Value),
+    Le(Value, Value)
 }
 
 #[derive(Debug)]
@@ -43,6 +61,7 @@ enum Intrisic {
 enum Value {
     Number(i32),
     Literal(LiteralIndex),
+    Boolean(bool),
     VariableLoad(VariableIndex),
     Call {
         func: FunctionIndex,
@@ -62,3 +81,4 @@ pub struct VariableOffset {
 type FunctionIndex = usize;
 type VariableIndex = usize;
 type LiteralIndex = usize;
+type LabelIndex = usize;

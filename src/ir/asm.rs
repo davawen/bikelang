@@ -130,6 +130,41 @@ impl Arithmetic {
     }
 }
 
+impl Comparison {
+    fn generate_asm(&self, func: &Function) -> String {
+        use Comparison::*;
+        let (rax, left, comparison) = match self {
+            Unconditional | Never => return "".to_owned(),
+            NotZero(v) | Zero(v) => {
+                let rax = Register::Rax.as_str(v.size(func));
+                ( rax, v, format!("test {rax}, {rax}") ) 
+            },
+            Eq(l, r) | Neq(l, r) | Gt(l, r) | Ge(l, r) | Lt(l, r) | Le(l, r) => {
+                let rax = Register::Rax.as_str(l.size(func));
+                ( rax, l, format!("cmp {rax}, {}", r.as_operand(func)))
+            }
+        };
+
+        format!("mov {rax}, {}\n{comparison}", left.as_operand(func))
+    }
+
+    fn as_jump(&self) -> &'static str {
+        use Comparison::*;
+        match self {
+            Unconditional => "jmp",
+            Never => "",
+            NotZero(..) => "jnz",
+            Zero(..) => "jz",
+            Eq(..) => "je",
+            Neq(..) => "jne",
+            Gt(..) => "jg",
+            Ge(..) => "jge",
+            Lt(..) => "jl",
+            Le(..) => "jle"
+        }
+    }
+}
+
 impl Intrisic {
     fn generate_asm(&self, ir: &Ir, func: &Function) -> String {
         use Intrisic::*;
@@ -172,7 +207,15 @@ impl Instruction {
             },
             Instruction::StoreOperation(idx, op) => {
                 let (reg, code) = op.generate_asm(func);
-                format!("{code}\nmov {}, {reg}\n", variable_operand(func, *idx))
+                format!("{code}mov {}, {reg}\n", variable_operand(func, *idx))
+            },
+            Instruction::Label(label_idx) => {
+                format!(".label{label_idx}")
+            }
+            Instruction::Jump(label_idx, comp) => {
+                let comparison = comp.generate_asm(func);
+                let jump = comp.as_jump();
+                format!("{comparison}\n{jump} .label{label_idx}\n")
             },
             Instruction::Intrisic(i) => {
                 i.generate_asm(ir, func)
