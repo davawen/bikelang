@@ -67,16 +67,6 @@ impl Operation {
             Assignment => 6
         }
     }
-
-    pub fn is_comparison(&self) -> bool {
-        use Operation::*;
-        matches!(self, Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals)
-    }
-
-    pub fn is_arithmetic(&self) -> bool {
-        use Operation::*;
-        matches!(self, Add | Sub | Mul | Div)
-    }
 }
 
 impl From<Keyword> for Token {
