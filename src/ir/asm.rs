@@ -122,9 +122,8 @@ impl Arithmetic {
             Not(v) => {
                 let size = v.size(func);
                 let rax = Register::Rax.as_str(size);
-                let mask = 2_u64.pow(size*8) - 1;
                 (rax, format!(
-                    "mov {rax}, {}\nxor {rax}, {mask}\n", 
+                    "mov {rax}, {}\nxor {rax}, 1\n", 
                     v.as_operand(func)
                 ))
             }

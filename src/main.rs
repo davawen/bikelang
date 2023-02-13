@@ -46,18 +46,59 @@ func main() -> void {
 
 const SOURCE: &str = r#"
 func main() -> void {
-    i32 idx = 1;
-    i32 sum = 0;
-    loop {
-        if idx >= 1000 { break };
+    i32 factor1 = 100;
+    i32 largest = 0;
 
-        if idx % 3 == 0 || idx % 5 == 0 {
-            sum = sum + idx;
-            print#(idx, "\n");
+    loop {
+        if factor1 == 1000 { break };
+
+        i32 factor2 = 100;
+        loop {
+            if factor2 == 1000 { break };
+
+            i32 num = factor1 * factor2;
+            if num > largest {
+                i32 copy = num;
+                i32 reversed = 0;
+
+                loop {
+                    if copy == 0 { break };
+
+                    i32 remainder = copy % 10;
+
+                    reversed = reversed * 10;
+                    reversed = reversed + remainder;
+
+                    copy = copy / 10;
+                };
+
+                bool is_palindrome = 1 == 1;
+
+                copy = num;
+                loop {
+                    if copy == 0 { break };
+
+                    if copy % 10 != reversed % 10 {
+                        is_palindrome = 0 == 1;
+                        break;
+                    };
+
+                    copy = copy / 10;
+                    reversed = reversed / 10;
+                };
+
+                if is_palindrome {
+                    print#(num, " is a palindrome!\n");
+                    largest = num;
+                };
+            };
+
+            factor2 = factor2 + 1;
         };
-        idx = idx + 1;
+        factor1 = factor1 + 1;
     };
-    print#(sum, "\n");
+
+    print#(largest, " is the largest palindrome!\n");
 }
 "#;
 
