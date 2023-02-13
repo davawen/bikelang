@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::token::{Dir, Operation, Token, Keyword};
+use crate::token::{self, Dir, Token, Keyword};
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -14,8 +14,12 @@ pub enum Node {
         name: String,
         parameter_list: Vec<Node>,
     },
+    UnaryExpr {
+        op: UnaryOperation,
+        value: Box<Node>
+    },
     Expr {
-        op: Operation,
+        op: BinaryOperation,
         lhs: Box<Node>,
         rhs: Box<Node>
     },
@@ -45,6 +49,33 @@ pub enum Intrisic {
     Print(Vec<Node>)
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum UnaryOperation {
+    LogicalNot
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BinaryOperation {
+    Assignment,
+
+    Equals,
+    NotEquals,
+    Greater,
+    GreaterOrEquals,
+    Lesser,
+    LesserOrEquals,
+
+    LogicalAnd,
+    LogicalOr,
+    LogicalXor,
+
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Modulus
+}
+
 #[derive(Debug, Error)]
 pub enum ASTError {
     #[error("Unexpected token {0:?}")]
@@ -60,6 +91,51 @@ pub enum ASTError {
 }
 
 type Result<T> = std::result::Result<T, ASTError>;
+
+impl UnaryOperation {
+    fn from_op(op: token::Operation) -> Result<Self> {
+        use token::Operation::*;
+        match op {
+            LogicalNot => Ok(UnaryOperation::LogicalNot),
+            _ => Err(ASTError::InvalidExpression)
+        }
+    }
+}
+
+impl BinaryOperation {
+    fn from_op(op: token::Operation) -> Result<Self> {
+        macro_rules! map {
+            ($($x:ident),+) => {
+                match op {
+                    $(token::Operation::$x => Ok(BinaryOperation::$x),)+
+                    _ => Err(ASTError::InvalidExpression)
+                }
+            };
+        }
+
+        map!(
+            Assignment,
+            Equals, NotEquals, Greater, GreaterOrEquals, Lesser, LesserOrEquals,
+            LogicalAnd, LogicalOr, LogicalXor,
+            Add, Sub, Mul, Div, Modulus
+        )
+    }
+
+    pub fn is_comparison(&self) -> bool {
+        use BinaryOperation::*;
+        matches!(self, Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals)
+    }
+
+    pub fn is_arithmetic(&self) -> bool {
+        use BinaryOperation::*;
+        matches!(self, Add | Sub | Mul | Div | Modulus)
+    }
+
+    pub fn is_logic(&self) -> bool {
+        use BinaryOperation::*;
+        matches!(self, LogicalAnd | LogicalOr | LogicalXor)
+    }
+}
 
 impl Intrisic {
     fn from_parameters(name: &str, parameters: Vec<Node>) -> Result<Self> {
@@ -97,7 +173,7 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
             Ok(Node::Expr {
                 lhs: Box::new(inner_expression),
                 rhs: Box::new(parse_expr(rhs)?),
-                op: *op,
+                op: BinaryOperation::from_op(*op)?,
             })
         }
         // Else just return the content of the parenthesis
@@ -161,10 +237,14 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
             let block = parse_block(&following[..matching])?;
             parse_following_or_return_inner(following, matching, block)
         }
+        [Token::Op(op), _value] => Ok(Node::UnaryExpr { 
+            op: UnaryOperation::from_op(*op)?, 
+            value: Box::new(parse_expr(&tokens[1..])?)
+        }),
         [_lhs, Token::Op(op), _rhs] => Ok(Node::Expr {
             lhs: Box::new(parse_expr(&tokens[..1])?),
             rhs: Box::new(parse_expr(&tokens[2..])?),
-            op: *op,
+            op: BinaryOperation::from_op(*op)?,
         }),
         tokens => {
             let mut scope = 0;
@@ -192,7 +272,7 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
                 Ok(Node::Expr {
                     lhs: Box::new(parse_expr(&tokens[0..idx])?),
                     rhs: Box::new(parse_expr(&tokens[(idx + 1)..])?),
-                    op: *op,
+                    op: BinaryOperation::from_op(*op)?,
                 })
             } else {
                 Err(ASTError::InvalidExpression)

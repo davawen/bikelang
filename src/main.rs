@@ -23,7 +23,7 @@ mod token;
 //     out
 // }
 
-const SOURCE: &str = r#"
+const CARTESIAN: &str = r#"
 func main() -> void {
     i32 j = 0;
     print#("Cartesian product: \n");
@@ -43,6 +43,24 @@ func main() -> void {
     print#("`i` is still valid here: ", i, "\n");
 } 
 "#;
+
+const SOURCE: &str = r#"
+func main() -> void {
+    i32 idx = 1;
+    i32 sum = 0;
+    loop {
+        if idx >= 1000 { break };
+
+        if idx % 3 == 0 || idx % 5 == 0 {
+            sum = sum + idx;
+            print#(idx, "\n");
+        };
+        idx = idx + 1;
+    };
+    print#(sum, "\n");
+}
+"#;
+
     // print#("The number is: ", a);
 /*
 

@@ -1,5 +1,3 @@
-use thiserror::Error;
-
 mod generate;
 mod asm;
 
@@ -46,7 +44,12 @@ enum Arithmetic {
     Add(Value, Value),
     Sub(Value, Value),
     Mul(Value, Value),
-    Div(Value, Value)
+    Div(Value, Value),
+    Modulus(Value, Value),
+    And(Value, Value),
+    Or(Value, Value),
+    Xor(Value, Value),
+    Not(Value)
 }
 
 #[derive(Debug)]

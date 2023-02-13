@@ -1,23 +1,34 @@
-use crate::{ast, token::Operation, analysis, utility::PushIndex};
+use crate::{ast::{self, BinaryOperation, UnaryOperation}, analysis, utility::PushIndex};
 
 use super::*;
 
 impl Arithmetic {
-    fn from_op(op: Operation, lhs: Value, rhs: Value) -> Self {
-        use Operation::*;
-        match op {
-            Add => Arithmetic::Add(lhs, rhs),
-            Sub => Arithmetic::Sub(lhs, rhs),
-            Mul => Arithmetic::Mul(lhs, rhs),
-            Div => Arithmetic::Div(lhs, rhs),
-            _ => unreachable!()
+    fn from_op(op: BinaryOperation, lhs: Value, rhs: Value) -> Self {
+        macro_rules! map {
+            ($($l:ident => $r:ident),+) => {
+                match op {
+                    $(BinaryOperation::$l => Arithmetic::$r(lhs, rhs),)+
+                    _ => unreachable!()
+                }
+            };
+        }
+
+        map! {
+            Add => Add,
+            Sub => Sub,
+            Mul => Mul,
+            Div => Div,
+            Modulus => Modulus,
+            LogicalAnd => And,
+            LogicalOr => Or,
+            LogicalXor => Xor
         }
     }
 }
 
 impl Comparison { 
-    fn from_op(op: Operation, lhs: Value, rhs: Value) -> Self {
-        use Operation::*;
+    fn from_op(op: BinaryOperation, lhs: Value, rhs: Value) -> Self {
+        use BinaryOperation::*;
         match op {
             Equals => Comparison::Eq(lhs, rhs),
             NotEquals => Comparison::Neq(lhs, rhs),
@@ -50,7 +61,7 @@ impl Function {
     /// Invariant: app's function_bodies can't be used!
     fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, func: &analysis::Function, scope: &[Scope], node: ast::Node) -> Value {
         match node {
-            ast::Node::Expr { lhs, rhs, op: Operation::Assignment } => {
+            ast::Node::Expr { lhs, rhs, op: BinaryOperation::Assignment } => {
                 let (ast::Node::Identifier(var) | ast::Node::Definition { name: var, .. }) = *lhs
                 else { 
                     todo!("Can only assign values to variables for now")
@@ -63,6 +74,18 @@ impl Function {
 
                 Value::NoValue
             }
+            ast::Node::UnaryExpr { op, value } => {
+                let value = self.fold_node(ir, app, func, scope, *value);
+                let temporary = self.add_variable(1);
+
+                use UnaryOperation::*;
+                let ins = match op {
+                    LogicalNot => Instruction::StoreOperation(temporary, Arithmetic::Not(value))
+                };
+
+                self.instructions.push(ins);
+                Value::VariableLoad(temporary)
+            }
             ast::Node::Expr { lhs, rhs, op } => {
                 let lhs = self.fold_node(ir, app, func, scope, *lhs);
                 let rhs = self.fold_node(ir, app, func, scope, *rhs);
@@ -73,11 +96,15 @@ impl Function {
                     op if op.is_arithmetic() => {
                         temporary = self.add_variable(4);
                         Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs))
-                    },
+                    }
+                    op if op.is_logic() => {
+                        temporary = self.add_variable(1);
+                        Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs))
+                    }
                     op if op.is_comparison() => {
                         temporary = self.add_variable(1);
                         Instruction::StoreComparison(temporary, Comparison::from_op(op, lhs, rhs))
-                    },
+                    }
                     _ => unreachable!()
                 };
                 
@@ -113,13 +140,16 @@ impl Function {
             ast::Node::If { condition, body } => {
                 let idx = self.add_label();
 
-                let jump = if let ast::Node::Expr { op, lhs, rhs } = *condition {
-                    let lhs = self.fold_node(ir, app, func, scope, *lhs);
-                    let rhs = self.fold_node(ir, app, func, scope, *rhs);
-                    Comparison::from_op(op, lhs, rhs).inverse() // Skip the function's body if the condition is NOT true
-                } else {
-                    let value = self.fold_node(ir, app, func, scope, *condition);
-                    Comparison::NotZero(value).inverse()
+                let jump = match *condition { 
+                    ast::Node::Expr { op, lhs, rhs } if op.is_comparison() => {
+                        let lhs = self.fold_node(ir, app, func, scope, *lhs);
+                        let rhs = self.fold_node(ir, app, func, scope, *rhs);
+                        Comparison::from_op(op, lhs, rhs).inverse() // Skip the function's body if the condition is NOT true
+                    } 
+                    _ => {
+                        let value = self.fold_node(ir, app, func, scope, *condition);
+                        Comparison::NotZero(value).inverse()
+                    }
                 };
 
                 let scope = &[scope, &[Scope::If { end_label: idx }]].concat();
@@ -204,9 +234,8 @@ impl Function {
     }
 
     fn generate_ir(&mut self, ir: &mut Ir, app: &analysis::App, definition: &analysis::Function, body: analysis::FunctionBody) {
-        let mut scope = Vec::new();
         for node in body.body {
-            self.fold_node(ir, app, definition, &mut scope, node);
+            self.fold_node(ir, app, definition, &[], node);
         }
     }
 }

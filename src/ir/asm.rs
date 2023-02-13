@@ -100,13 +100,16 @@ impl Arithmetic {
     fn generate_asm(&self, func: &Function) -> (&'static str, String) {
         use Arithmetic::*;
         match self {
-            Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) => {
+            Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | And(lhs, rhs) | Or(lhs, rhs) | Xor(lhs, rhs) => {
                 let rax = Register::Rax.as_str(lhs.size(func));
 
                 let op = match self {
                     Add(..) => "add",
                     Sub(..) => "sub",
                     Mul(..) => "imul",
+                    And(..) => "and",
+                    Or(..) => "or",
+                    Xor(..) => "xor",
                     _ => unreachable!()
                 };
 
@@ -115,17 +118,28 @@ impl Arithmetic {
                     lhs.as_operand(func),
                     rhs.as_operand(func)
                 ))
-            },
-            Div(lhs, rhs) => {
+            }
+            Not(v) => {
+                let size = v.size(func);
+                let rax = Register::Rax.as_str(size);
+                let mask = 2_u64.pow(size*8) - 1;
+                (rax, format!(
+                    "mov {rax}, {}\nxor {rax}, {mask}\n", 
+                    v.as_operand(func)
+                ))
+            }
+            Div(lhs, rhs) | Modulus(lhs, rhs)  => {
                 let rax = Register::Rax.as_str(lhs.size(func));
+                let r8 = Register::R8.as_str(lhs.size(func));
 
                 // Signed dived of rdx:rax = make sure rdx is null
                 (rax, format!(
-                    "mov {rax}, {}\nxor rdx, rdx\nidivq {}",
+                    "xor rdx, rdx\nmov {rax}, {}\nmov {r8}, {}\nidiv {r8}{}\n",
                     lhs.as_operand(func),
-                    rhs.as_operand(func)
+                    rhs.as_operand(func),
+                    if matches!(self, Modulus(..)) { "\nmov rax, rdx" } else { "" }
                 ))
-            },
+            }
         }
     }
 }
@@ -219,11 +233,11 @@ impl Instruction {
                 } else {
                     format!("mov {}, {}\n", variable_operand(func, *idx), value.as_operand(func))
                 }
-            },
+            }
             Instruction::StoreOperation(idx, op) => {
                 let (reg, code) = op.generate_asm(func);
                 format!("{code}mov {}, {reg}\n", variable_operand(func, *idx))
-            },
+            }
             Instruction::StoreComparison(idx, comp) => {
                 let comparison = comp.generate_asm(func);
                 let store = comp.as_store();
@@ -236,11 +250,10 @@ impl Instruction {
                 let comparison = comp.generate_asm(func);
                 let jump = comp.as_jump();
                 format!("{comparison}\n{jump} .label{label_idx}\n")
-            },
+            }
             Instruction::Intrisic(i) => {
                 i.generate_asm(ir, func)
             }
-            _ => unreachable!("instructions not all set lmao: {self:#?}")
         }
     }
 }

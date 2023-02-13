@@ -43,20 +43,28 @@ pub enum Operation {
     Lesser,
     LesserOrEquals,
 
+    LogicalNot,
+    LogicalAnd,
+    LogicalOr,
+    LogicalXor,
+
     Add,
     Sub,
     Mul,
     Div,
+    Modulus
 }
 
 impl Operation {
     pub fn precedence(&self) -> u32 {
         use Operation::*;
         match self {
-            Mul | Div => 1,
-            Add | Sub => 2,
-            Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => 3,
-            Assignment => 4
+            LogicalNot => 1,
+            Mul | Div | Modulus => 2,
+            Add | Sub => 3,
+            Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => 4,
+            LogicalAnd | LogicalOr | LogicalXor => 5,
+            Assignment => 6
         }
     }
 
@@ -130,6 +138,18 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                 }
                 word = String::new();
 
+                macro_rules! then_or {
+                    ($then:expr, $($c:expr, $or:expr),+) => {
+                        match chars.peek() {
+                            $(Some($c) => {
+                                chars.next();
+                                $or
+                            })+
+                            _ => $then
+                        }
+                    };
+                }
+
                 match c {
                     '(' => Some(Token::Paren(Left)),
                     ')' => Some(Token::Paren(Right)),
@@ -139,43 +159,29 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                     ',' => Some(Token::Comma),
                     '#' => Some(Token::Hash),
                     '"' => Some(Token::StringLiteral(get_string_literal(chars.by_ref()))),
-                    '-' => {
-                        if let Some('>') = chars.peek() {
-                            chars.next();
-                            Some(Token::Arrow)
-                        } else {
-                            Some(Token::Op(Operation::Sub))
-                        }
-                    },
-                    '=' => {
-                        if let Some('=') = chars.peek() {
-                            chars.next();
-                            Some(Token::Op(Operation::Equals))
-                        } else {
-                            Some(Token::Op(Operation::Assignment))
-                        }
-                    },
-                    '!' => {
-                        if let Some('=') = chars.peek() {
-                            chars.next();
-                            Some(Token::Op(Operation::NotEquals))
-                        }
-                        else { None }
-                    },
-                    '>' => {
-                        if let Some('=') = chars.peek() {
-                            chars.next();
-                            Some(Token::Op(Operation::GreaterOrEquals))
-                        }
-                        else { Some(Token::Op(Operation::Greater)) }
-                    },
-                    '<' => {
-                        if let Some('=') = chars.peek() {
-                            chars.next();
-                            Some(Token::Op(Operation::LesserOrEquals))
-                        }
-                        else { Some(Token::Op(Operation::Lesser)) }
-                    },
+                    '-' => then_or!(
+                        Some(Token::Op(Operation::Sub)),
+                        '>', Some(Token::Arrow)
+                    ),
+                    '=' => then_or!(
+                        Some(Token::Op(Operation::Assignment)), 
+                        '=', Some(Token::Op(Operation::Equals))
+                    ),
+                    '!' => then_or!(
+                        Some(Token::Op(Operation::LogicalNot)),
+                        '=', Some(Token::Op(Operation::NotEquals))
+                    ),
+                    '>' => then_or!(
+                        Some(Token::Op(Operation::Greater)),
+                        '=', Some(Token::Op(Operation::GreaterOrEquals))
+                    ),
+                    '<' => then_or!(
+                        Some(Token::Op(Operation::Lesser)),
+                        '=', Some(Token::Op(Operation::LesserOrEquals))
+                    ),
+                    '&' => then_or!(None, '&', Some(Token::Op(Operation::LogicalAnd))),
+                    '|' => then_or!(None, '|', Some(Token::Op(Operation::LogicalOr))),
+                    '^' => then_or!(None, '^', Some(Token::Op(Operation::LogicalXor))),
                     '+' => Some(Token::Op(Operation::Add)),
                     '*' => Some(Token::Op(Operation::Mul)),
                     '/' => {
@@ -185,7 +191,8 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                         } else {
                             Some(Token::Op(Operation::Div))
                         }
-                    },
+                    }
+                    '%' => Some(Token::Op(Operation::Modulus)),
                     _ => None,
                 }
             }

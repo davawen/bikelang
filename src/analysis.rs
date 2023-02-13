@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
-use crate::{ast::{Node, Intrisic}, utility::PushIndex, token::Operation};
+use crate::{ast::{Node, Intrisic, BinaryOperation, UnaryOperation}, utility::PushIndex};
 
 #[derive(Debug)]
 pub struct App {
@@ -83,6 +83,14 @@ impl Type {
             _ => Err(AnalysisError::Unknown("type", name.to_owned()))
         }
     }
+
+    pub fn expect(self, expected: Self, msg: &'static str) -> Result<Self> {
+        if self == expected {
+            Ok(self)
+        } else {
+            Err(AnalysisError::MismatchedType(msg, expected, self))
+        }
+    }
 }
 
 impl Function {
@@ -117,6 +125,9 @@ impl Function {
                     } else {
                         return Err(AnalysisError::Redefinition("variable", name.clone()));
                     }
+                }
+                Node::UnaryExpr { value, .. } => {
+                    get_variable_definitions(variables, value)?;
                 }
                 Node::Expr { lhs, rhs, .. } => {
                     get_variable_definitions(variables, lhs)?;
@@ -173,7 +184,7 @@ impl Node {
                 definition
                     .variables.get(name).copied()
                     .ok_or(AnalysisError::Unknown("variable", name.to_owned()))
-            },
+            }
             Node::Intrisic(intrisic) => {
                 match intrisic {
                     Intrisic::Asm(x) => {
@@ -211,8 +222,15 @@ impl Node {
                 }
 
                 Ok(func.return_type)
-            },
-            Node::Expr { lhs, rhs, op: Operation::Assignment } => {
+            }
+            Node::UnaryExpr { op, value } => {
+                let value = value.get_type(app, definition)?;
+                use UnaryOperation::*;
+                match op {
+                    LogicalNot => value.expect(Type::Boolean, "logical operations only apply to booleans")
+                }
+            }
+            Node::Expr { lhs, rhs, op: BinaryOperation::Assignment } => {
                 if !matches!(**lhs, Node::Identifier(_) | Node::Definition { .. }) { 
                     return Err(AnalysisError::WrongNodeType("a variable definition", *lhs.clone())) 
                 }
@@ -230,39 +248,36 @@ impl Node {
                 let lhs = lhs.get_type(app, definition)?;
                 let rhs = rhs.get_type(app, definition)?;
 
-                use Operation::*;
+                use BinaryOperation::*;
                 match op {
-                    Add | Sub | Div | Mul => if lhs == Type::Integer32 {
-                        if rhs == Type::Integer32 {
-                            Ok(lhs)
-                        } else {
-                            Err(AnalysisError::MismatchedType("math operations only apply to numbers", Type::Integer32, rhs))
-                        }
-                    } else {
-                        Err(AnalysisError::MismatchedType("math operations only apply to numbers", Type::Integer32, lhs))
-                    },
+                    Add | Sub | Div | Mul | Modulus => {
+                        lhs.expect(Type::Integer32, "math operations only apply to numbers")?;
+                        rhs.expect(Type::Integer32, "math operations only apply to numbers")
+                    }
                     Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => if lhs == rhs {
                         Ok(Type::Boolean)
                     } else {
                         Err(AnalysisError::MismatchedType("cannot compare different types", lhs, rhs))
-                    },
-                    _ => unreachable!()
+                    }
+                    LogicalAnd | LogicalOr | LogicalXor => {
+                        lhs.expect(Type::Boolean, "logical operations only apply to booleans")?;
+                        rhs.expect(Type::Boolean, "logical operations only apply to booleans")
+                    }
+                    Assignment => unreachable!()
                 }
                 
-            },
+            }
             Node::If { condition, body } => {
                 let condition = condition.get_type(app, definition)?;
 
-                if condition != Type::Boolean {
-                    return Err(AnalysisError::MismatchedType("if statement condition needs to be boolean", Type::Boolean, condition));
-                }
+                condition.expect(Type::Boolean, "if statement condition needs to be boolean")?;
 
                 body.get_type(app, definition)
-            },
+            }
             Node::Loop { body } => {
                 body.get_type(app, definition)?;
                 Ok(Type::Void)
-            },
+            }
             Node::Break => Ok(Type::Void),
             Node::Block(nodes) => {
                 let mut nodes = nodes.iter().peekable();
@@ -273,7 +288,7 @@ impl Node {
                     node.get_type(app, definition)?;
                 }
                 Ok(Type::Void) 
-            },
+            }
             Node::Statement( inner ) => {
                 inner.get_type(app, definition)?;
                 Ok(Type::Void)
