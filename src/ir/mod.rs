@@ -69,6 +69,13 @@ enum Value {
     NoValue
 }
 
+#[derive(Debug, Clone)]
+enum Scope {
+    Block,
+    If { end_label: LabelIndex },
+    Loop { start_label: LabelIndex, end_label: LabelIndex }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct VariableOffset {
     /// The size of this variable in bytes

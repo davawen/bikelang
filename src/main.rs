@@ -25,24 +25,22 @@ mod token;
 
 const SOURCE: &str = r#"
 func main() -> void {
-    i32 idx = 0;
+    i32 j = 0;
+    print#("Cartesian product: \n");
     loop {
-        if idx < 50 {
-            print#("Small number: ", idx, "\n");
+        if j >= 10 { break };
+
+        i32 i = 0;
+        loop {
+            if i >= 10 { break };
+
+            print#("( ", i, ", ", j, " )\n");
+            i = i + 1;
         };
-        if idx >= 50 {
-            if idx < 100 {
-                print#("Medium Number: ", idx, "\n");
-            }
-        };
-        if idx >= 100 {
-            print#("Big number: ", idx, "\n")
-        };
-        if idx >= 150 {
-            asm#("jmp .label1")
-        };
-        idx = idx + 3;
-    }
+        j = j + 1;
+    };
+
+    print#("`i` is still valid here: ", i, "\n");
 } 
 "#;
     // print#("The number is: ", a);

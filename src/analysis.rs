@@ -109,7 +109,7 @@ impl Function {
 
         let Node::Block(body) = *body else { return Err(AnalysisError::WrongNodeType("A function body", *body)) };
 
-        fn get_variable_definitions(app: &App, variables: &mut IndexMap<String, Type>, node: &Node) -> Result<()> {
+        fn get_variable_definitions(variables: &mut IndexMap<String, Type>, node: &Node) -> Result<()> {
             match node {
                 Node::Definition { name, typename } => {
                     if !variables.contains_key(name) {
@@ -117,29 +117,29 @@ impl Function {
                     } else {
                         return Err(AnalysisError::Redefinition("variable", name.clone()));
                     }
-                },
+                }
                 Node::Expr { lhs, rhs, .. } => {
-                    get_variable_definitions(app, variables, lhs)?;
-                    get_variable_definitions(app, variables, rhs)?;
-                },
+                    get_variable_definitions(variables, lhs)?;
+                    get_variable_definitions(variables, rhs)?;
+                }
                 Node::Statement(x) => {
-                    get_variable_definitions(app, variables, x)?;
-                },
+                    get_variable_definitions(variables, x)?;
+                }
                 Node::Block(body) => {
                     for expr in body {
-                        get_variable_definitions(app, variables, expr)?;
+                        get_variable_definitions(variables, expr)?;
                     }
-                },
-                Node::If { body, .. } => {
-                    get_variable_definitions(app, variables, body)?;
                 }
-                _ => ()
+                Node::If { body, .. } | Node::Loop { body } => {
+                    get_variable_definitions(variables, body)?;
+                }
+                Node::FuncDef { .. } | Node::Call { .. } | Node::Break | Node::Intrisic(_) | Node::Identifier(_) | Node::Number(_) | Node::StringLiteral(_) => ()
             };
             Ok(())
         }
 
         for expr in &body {
-            get_variable_definitions(app, &mut variables, expr)?;
+            get_variable_definitions(&mut variables, expr)?;
         }
 
         let body = app.function_bodies.push_idx(FunctionBody{ body, definition: 0 });
