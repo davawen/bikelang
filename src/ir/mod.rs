@@ -1,3 +1,5 @@
+use crate::analysis;
+
 mod generate;
 mod asm;
 
@@ -12,6 +14,7 @@ struct Function {
     name: String,
     variables: Vec<VariableOffset>,
     instructions: Vec<Instruction>,
+    return_variable: Option<VariableIndex>,
     label_num: usize
 }
 
@@ -22,7 +25,13 @@ enum Instruction {
     StoreComparison(VariableIndex, Comparison),
     Label(LabelIndex),
     Jump(LabelIndex, Comparison),
-    Intrisic(Intrisic)
+    Intrisic(Intrisic),
+    Call {
+        func: FunctionIndex,
+        parameters: Vec<Value>,
+        return_type: analysis::Type
+    },
+    Ret
 }
 
 #[derive(Debug)]
@@ -65,10 +74,7 @@ enum Value {
     Literal(LiteralIndex),
     Boolean(bool),
     VariableLoad(VariableIndex),
-    Call {
-        func: FunctionIndex,
-        parameters: Vec<Value>
-    },
+    LastCall { size: u32 },
     NoValue
 }
 
@@ -84,7 +90,9 @@ pub struct VariableOffset {
     /// The size of this variable in bytes
     pub size: u32,
     /// The total offset of this variable from the stack base
-    pub total_offset: u32
+    pub total_offset: u32,
+    /// Wether this variable is an argument (is it stored in this stack frame or in the parent one)
+    pub argument: bool
 }
 
 type FunctionIndex = usize;

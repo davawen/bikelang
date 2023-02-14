@@ -2,18 +2,24 @@ use itertools::Itertools;
 
 use super::*;
 
-fn variable_operand(func: &Function, idx: VariableIndex) -> String {
-    let var = &func.variables[idx];
-    format!(
-    "{} [rbp-{}]",
-    match var.size {
+fn word_size(size: u32) -> &'static str {
+    match size {
         1 => "BYTE",
         2 => "WORD",
         4 => "DWORD",
         8 => "QWORD",
         _ => unreachable!("Invalid word size")
-    },
-    var.total_offset)
+    }
+}
+
+fn variable_operand(func: &Function, idx: VariableIndex) -> String {
+    let var = &func.variables[idx];
+    format!(
+        "{} [rbp{}{}]",
+        word_size(var.size),
+        if var.argument { '+' } else { '-' },
+        var.total_offset
+    )
 }
 
 #[allow(unused)]
@@ -75,21 +81,43 @@ impl Register {
 impl Value {
     fn as_operand(&self, func: &Function) -> String {
         match self {
-            Value::Number(x) => x.to_string(),
-            Value::VariableLoad(idx) => variable_operand(func, *idx),
-            _ => unreachable!("blegh: {self:#?}")
+            Value::Number(x) => format!("{} {x}", word_size(4)),
+            &Value::VariableLoad(idx) => variable_operand(func, idx),
+            &Value::LastCall { size } => format!("{} [rsp]", word_size(size)),
+            &Value::Boolean(x) => if x { "BYTE 1".to_owned() } else { "BYTE 0".to_owned() },
+            Value::NoValue | Value::Literal(_) => unreachable!("blegh: {self:#?}")
         }
     }
 
-    fn move_to(&self, func: &Function, reg: Register) -> String {
-        format!("mov {}, {}", reg.as_str(self.size(func)), self.as_operand(func))
+    fn move_to(&self, reg: Register, func: &Function) -> (&'static str, String) {
+        let reg = reg.as_str(self.size(func));
+        (reg, format!("mov {reg}, {}", self.as_operand(func)))
+    }
+
+    fn is_memory_access(&self) -> bool {
+        match self {
+            Value::Number(_) | Value::Boolean(_) => false,
+            Value::VariableLoad(_) | Value::LastCall { .. } => true,
+            Value::NoValue | Value::Literal(_) => unreachable!("{self:#?}")
+        }
+    }
+
+    fn direct_move_or_pass(&self, destination: &str, func: &Function) -> String {
+        if self.is_memory_access() {
+            let (reg, move_to) = self.move_to(Register::Rax, func);
+            format!("{move_to}\nmov {}, {reg}\n", destination)
+        } else {
+            format!("mov {}, {}\n", destination, self.as_operand(func))
+        }
     }
 
     fn size(&self, func: &Function) -> u32 {
         match self {
             Value::Number(_) => 4,
             Value::VariableLoad(idx) => func.variables[*idx].size,
-            _ => todo!("value blegh: {self:#?}")
+            Value::Boolean(_) => 1,
+            &Value::LastCall { size } => size,
+            Value::NoValue | Value::Literal(_) => todo!("value blegh: {self:#?}")
         }
     }
 }
@@ -226,12 +254,7 @@ impl Instruction {
     fn generate_asm(&self, ir: &Ir, func: &Function) -> String {
         match self {
             Instruction::VariableStore(idx, value) => {
-                if let Value::VariableLoad(_) = value {
-                    let reg = Register::Rax.as_str(value.size(func));
-                    format!("mov {reg}, {}\nmov {}, {reg}\n", value.as_operand(func), variable_operand(func, *idx))
-                } else {
-                    format!("mov {}, {}\n", variable_operand(func, *idx), value.as_operand(func))
-                }
+                value.direct_move_or_pass(&variable_operand(func, *idx), func)
             }
             Instruction::StoreOperation(idx, op) => {
                 let (reg, code) = op.generate_asm(func);
@@ -243,7 +266,7 @@ impl Instruction {
                 format!("{comparison}\n{store} {}\n", variable_operand(func, *idx))
             }
             Instruction::Label(label_idx) => {
-                format!(".label{label_idx}")
+                format!(".label{label_idx}:")
             }
             Instruction::Jump(label_idx, comp) => {
                 let comparison = comp.generate_asm(func);
@@ -253,6 +276,18 @@ impl Instruction {
             Instruction::Intrisic(i) => {
                 i.generate_asm(ir, func)
             }
+            Instruction::Call { func: func_idx, parameters, return_type } => {
+                format! {
+                    "{}{}\ncall {}\nadd rsp, {}",
+                    if return_type.size() > 0 { format!("sub rsp, {}\n", return_type.size()) } else { "".to_owned() },
+                    parameters.iter().rev().map(|p| {
+                        format!("sub rsp, {}\n{}", p.size(func), p.direct_move_or_pass("[rsp]", func))
+                    }).join("\n"),
+                    ir.functions[*func_idx].name,
+                    parameters.iter().map(|p| p.size(func)).sum::<u32>()
+                }
+            }
+            Instruction::Ret => "mov rsp, rbp\npop rbp\nret\n".to_owned()
         }
     }
 }
@@ -278,15 +313,6 @@ impl Function {
                 out.push('\n');
             }
         }
-
-        out.push_str(
-            "
-    ; leave stack frame
-    mov rsp, rbp
-    pop rbp
-    ret
-"
-        );
 
         out
     }

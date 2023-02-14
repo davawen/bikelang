@@ -1,0 +1,16 @@
+func fibonacci(i32 value) -> i32 {
+	if value <= 1 { return 1 };
+
+	return fibonacci(value - 1) + fibonacci(value - 2);
+}
+
+func main() -> void {
+	i32 idx = 0;
+	loop {
+		if idx > 10 { break };
+
+		print#(fibonacci(idx), ", ");
+		idx = idx + 1;
+	};
+}
+

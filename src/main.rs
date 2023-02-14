@@ -11,118 +11,24 @@ mod analysis;
 mod ir;
 mod token;
 
-// fn parse(mut tokens: &[Token]) -> Node {
-//     /// Returns the index of the matching brace or parenthesis
-//     /// The start token should be included in `tokens`
-//
-//     let mut out = Vec::new();
-//
-//     while !tokens.is_empty() {
-//     }
-//
-//     out
-// }
-
-const CARTESIAN: &str = r#"
-func main() -> void {
-    i32 j = 0;
-    print#("Cartesian product: \n");
-    loop {
-        if j >= 10 { break };
-
-        i32 i = 0;
-        loop {
-            if i >= 10 { break };
-
-            print#("( ", i, ", ", j, " )\n");
-            i = i + 1;
-        };
-        j = j + 1;
-    };
-
-    print#("`i` is still valid here: ", i, "\n");
-} 
-"#;
-
-const SOURCE: &str = r#"
-func main() -> void {
-    i32 factor1 = 100;
-    i32 largest = 0;
-
-    loop {
-        if factor1 == 1000 { break };
-
-        i32 factor2 = 100;
-        loop {
-            if factor2 == 1000 { break };
-
-            i32 num = factor1 * factor2;
-            if num > largest {
-                i32 copy = num;
-                i32 reversed = 0;
-
-                loop {
-                    if copy == 0 { break };
-
-                    i32 remainder = copy % 10;
-
-                    reversed = reversed * 10;
-                    reversed = reversed + remainder;
-
-                    copy = copy / 10;
-                };
-
-                bool is_palindrome = 1 == 1;
-
-                copy = num;
-                loop {
-                    if copy == 0 { break };
-
-                    if copy % 10 != reversed % 10 {
-                        is_palindrome = 0 == 1;
-                        break;
-                    };
-
-                    copy = copy / 10;
-                    reversed = reversed / 10;
-                };
-
-                if is_palindrome {
-                    print#(num, " is a palindrome!\n");
-                    largest = num;
-                };
-            };
-
-            factor2 = factor2 + 1;
-        };
-        factor1 = factor1 + 1;
-    };
-
-    print#(largest, " is the largest palindrome!\n");
-}
-"#;
-
-    // print#("The number is: ", a);
-/*
-
-func another(str val) -> i32 {
-    val = "Hiya!";
-    print#(val);
-
-    0
-}*/
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let tokens = tokenize(SOURCE);
+    let args: Vec<_> = std::env::args().collect();
+    if args.len() == 1 {
+        return Err("no arguments given".into());
+    }
+
+    let source = String::from_utf8(fs::read(&args[1])?)?;
+
+    let tokens = tokenize(&source);
     println!("{tokens:#?}");
 
     let ast = parse_ast(&tokens).log_err()?;
-    println!("{ast:#?}");
+    // println!("{ast:#?}");
 
     let mut app = analysis::App::new();
 
     app.insert_declarations(ast).log_err()?;
-    // println!("{app:#?}");
+    println!("{app:#?}");
 
     app.type_check().log_err()?;
 

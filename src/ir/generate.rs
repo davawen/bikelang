@@ -76,7 +76,7 @@ impl Function {
             }
             ast::Node::UnaryExpr { op, value } => {
                 let value = self.fold_node(ir, app, func, scope, *value);
-                let temporary = self.add_variable(1);
+                let temporary = self.add_temporary(1);
 
                 use UnaryOperation::*;
                 let ins = match op {
@@ -94,15 +94,15 @@ impl Function {
 
                 let ins = match op {
                     op if op.is_arithmetic() => {
-                        temporary = self.add_variable(4);
+                        temporary = self.add_temporary(4);
                         Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs))
                     }
                     op if op.is_logic() => {
-                        temporary = self.add_variable(1);
+                        temporary = self.add_temporary(1);
                         Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs))
                     }
                     op if op.is_comparison() => {
-                        temporary = self.add_variable(1);
+                        temporary = self.add_temporary(1);
                         Instruction::StoreComparison(temporary, Comparison::from_op(op, lhs, rhs))
                     }
                     _ => unreachable!()
@@ -111,10 +111,20 @@ impl Function {
                 self.instructions.push(ins);
                 Value::VariableLoad(temporary)
             }
-            ast::Node::Call { name, parameter_list } => Value::Call {
-                func: app.function_definitions.get_index_of(&name).unwrap(),
-                parameters: parameter_list.into_iter().map(|n| self.fold_node(ir, app, func, scope, n)).collect()
-            },
+            ast::Node::Call { name, parameter_list } => {
+                let (idx, _, called) = app.function_definitions.get_full(&name).unwrap();
+                let call = Instruction::Call {
+                    func: idx,
+                    return_type: called.return_type,
+                    parameters: parameter_list.into_iter().map(|n| self.fold_node(ir, app, func, scope, n)).collect()
+                };
+                self.instructions.push(call);
+
+                let temporary = self.add_temporary(called.return_type.size());
+                self.instructions.push(Instruction::VariableStore(temporary, Value::LastCall { size: called.return_type.size() }));
+
+                Value::VariableLoad(temporary)
+            }
             ast::Node::Intrisic(i) => {
                 match i {
                     ast::Intrisic::Asm(str) => {
@@ -182,6 +192,13 @@ impl Function {
 
                 Value::NoValue
             }
+            ast::Node::Return(inner) => {
+                let inner = self.fold_node(ir, app, func, scope, *inner);
+                self.instructions.push(Instruction::VariableStore(self.return_variable.unwrap(), inner));
+                self.instructions.push(Instruction::Ret);
+
+                Value::NoValue
+            }
             ast::Node::Block(nodes) => {
                 let scope = &[scope, &[Scope::Block]].concat();
                 let mut it = nodes.into_iter().peekable();
@@ -203,13 +220,18 @@ impl Function {
             ast::Node::Identifier(var) => Value::VariableLoad(func.variables.get_index_of(&var).unwrap()),
             ast::Node::Number(n) => Value::Number(n),
             ast::Node::StringLiteral(s) => Value::Literal(ir.push_literal(s)),
-            _ => unreachable!("this ast node shouldn't be given to ir generation, got: {node:#?}"),
+            ast::Node::FuncDef { .. } | ast::Node::Definition { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {node:#?}"),
         }
     }
 
-    fn add_variable(&mut self, size: u32) -> VariableIndex {
-        let total_offset = self.variables.last().map_or(0, |v| v.total_offset) + size;
-        self.variables.push_idx(VariableOffset { size, total_offset })
+    fn add_temporary(&mut self, size: u32) -> VariableIndex {
+        let total_offset = if let Some(VariableOffset { total_offset, argument: false, .. }) = self.variables.last() {
+            total_offset + size
+        } else {
+            size
+        };
+
+        self.variables.push_idx(VariableOffset { size, total_offset, argument: false })
     }
 
     fn add_label(&mut self) -> LabelIndex {
@@ -223,11 +245,26 @@ impl Function {
             name,
             variables: Vec::new(),
             instructions: Vec::new(),
-            label_num: 0
+            label_num: 0,
+            return_variable: None
         };
 
-        for v in definition.variables.values() {
-            this.add_variable(v.size());
+        let num_args = definition.arguments.len();
+        let mut total_offset = 16;
+        for v in definition.variables.values().take(num_args) {
+            this.variables.push(VariableOffset { size: v.size(), total_offset, argument: true});
+            total_offset += v.size();
+        }
+
+        let return_size = definition.return_type.size();
+        if return_size > 0 {
+            this.return_variable = Some(this.variables.push_idx(VariableOffset { 
+                size: return_size, total_offset, argument: true 
+            }));
+        }
+
+        for v in definition.variables.values().skip(num_args) {
+            this.add_temporary(v.size());
         }
 
         this
@@ -237,6 +274,7 @@ impl Function {
         for node in body.body {
             self.fold_node(ir, app, definition, &[], node);
         }
+        self.instructions.push(Instruction::Ret);
     }
 }
 

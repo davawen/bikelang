@@ -29,7 +29,8 @@ pub enum Keyword {
     Func,
     If,
     Loop,
-    Break
+    Break,
+    Return
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -118,6 +119,7 @@ pub fn tokenize(source: &str) -> Vec<Token> {
                     "if" => Some(Keyword::If.into()),
                     "loop" => Some(Keyword::Loop.into()),
                     "break" => Some(Keyword::Break.into()),
+                    "return" => Some(Keyword::Return.into()),
                     _ => match word.parse::<i32>() {
                         Ok(num) => Some(Token::Number(num)),
                         Err(_) => Some(Token::Word(word)),

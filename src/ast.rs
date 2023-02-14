@@ -31,6 +31,7 @@ pub enum Node {
         body: Box<Node>
     },
     Break,
+    Return(Box<Node>),
     Intrisic(Intrisic),
     Statement(Box<Node>),
     Block(Vec<Node>),
@@ -225,6 +226,9 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
             Ok(Node::Loop { body: Box::new(parse_expr(following)?) })
         }
         [Token::Keyword(Keyword::Break)] => Ok(Node::Break),
+        [Token::Keyword(Keyword::Return), return_expr @ ..] => {
+            Ok(Node::Return( Box::new(parse_expr(return_expr)?) ))
+        }
         [Token::Paren(Dir::Left), following @ ..] => {
             let matching = find_matching(following, Token::Paren(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
 

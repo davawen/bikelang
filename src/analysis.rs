@@ -136,15 +136,15 @@ impl Function {
                 Node::Statement(x) => {
                     get_variable_definitions(variables, x)?;
                 }
-                Node::Block(body) => {
+                Node::Block(body) | Node::Call { parameter_list: body, .. } => {
                     for expr in body {
                         get_variable_definitions(variables, expr)?;
                     }
                 }
-                Node::If { body, .. } | Node::Loop { body } => {
+                Node::If { body, .. } | Node::Loop { body } | Node::Return(body) => {
                     get_variable_definitions(variables, body)?;
                 }
-                Node::FuncDef { .. } | Node::Call { .. } | Node::Break | Node::Intrisic(_) | Node::Identifier(_) | Node::Number(_) | Node::StringLiteral(_) => ()
+                Node::FuncDef { .. } | Node::Break | Node::Intrisic(_) | Node::Identifier(_) | Node::Number(_) | Node::StringLiteral(_) => ()
             };
             Ok(())
         }
@@ -269,7 +269,6 @@ impl Node {
             }
             Node::If { condition, body } => {
                 let condition = condition.get_type(app, definition)?;
-
                 condition.expect(Type::Boolean, "if statement condition needs to be boolean")?;
 
                 body.get_type(app, definition)
@@ -279,6 +278,12 @@ impl Node {
                 Ok(Type::Void)
             }
             Node::Break => Ok(Type::Void),
+            Node::Return( expr ) => {
+                let out = expr.get_type(app, definition)?;
+                out.expect(definition.return_type, "return type doesn't correspond to the given function")?;
+
+                Ok(Type::Void)
+            }
             Node::Block(nodes) => {
                 let mut nodes = nodes.iter().peekable();
                 while let Some(node) = nodes.next() {
