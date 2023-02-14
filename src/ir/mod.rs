@@ -1,7 +1,12 @@
+use std::collections::HashMap;
+
+use slotmap::SlotMap;
+
 use crate::analysis;
 
 mod generate;
 mod asm;
+mod optimize;
 
 #[derive(Debug)]
 pub struct Ir {
@@ -12,17 +17,20 @@ pub struct Ir {
 #[derive(Debug)]
 struct Function {
     name: String,
-    variables: Vec<VariableOffset>,
+    variables: SlotMap<VariableKey, VariableOffset>,
+    named_variables: HashMap<String, VariableKey>,
+    last_variable: Option<VariableKey>,
+    return_variable: Option<VariableKey>,
+
     instructions: Vec<Instruction>,
-    return_variable: Option<VariableIndex>,
     label_num: usize
 }
 
 #[derive(Debug)]
 enum Instruction {
-    VariableStore(VariableIndex, Value),
-    StoreOperation(VariableIndex, Arithmetic),
-    StoreComparison(VariableIndex, Comparison),
+    VariableStore(VariableKey, Value),
+    StoreOperation(VariableKey, Arithmetic),
+    StoreComparison(VariableKey, Comparison),
     Label(LabelIndex),
     Jump(LabelIndex, Comparison),
     Intrisic(Intrisic),
@@ -73,7 +81,7 @@ enum Value {
     Number(i32),
     Literal(LiteralIndex),
     Boolean(bool),
-    VariableLoad(VariableIndex),
+    VariableLoad(VariableKey),
     LastCall { size: u32 },
     NoValue
 }
@@ -96,6 +104,6 @@ pub struct VariableOffset {
 }
 
 type FunctionIndex = usize;
-type VariableIndex = usize;
+type VariableKey = slotmap::DefaultKey;
 type LiteralIndex = usize;
 type LabelIndex = usize;

@@ -67,7 +67,7 @@ impl Function {
                     todo!("Can only assign values to variables for now")
                 };
 
-                let var = func.variables.get_index_of(&var).unwrap();
+                let var = self.named_variables[&var];
 
                 let rhs = self.fold_node(ir, app, func, scope, *rhs);
                 self.instructions.push(Instruction::VariableStore(var, rhs));
@@ -217,21 +217,22 @@ impl Function {
                 self.fold_node(ir, app, func, scope, *inner);
                 Value::NoValue
             }
-            ast::Node::Identifier(var) => Value::VariableLoad(func.variables.get_index_of(&var).unwrap()),
+            ast::Node::Identifier(var) => Value::VariableLoad(self.named_variables[&var]),
             ast::Node::Number(n) => Value::Number(n),
             ast::Node::StringLiteral(s) => Value::Literal(ir.push_literal(s)),
             ast::Node::FuncDef { .. } | ast::Node::Definition { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {node:#?}"),
         }
     }
 
-    fn add_temporary(&mut self, size: u32) -> VariableIndex {
-        let total_offset = if let Some(VariableOffset { total_offset, argument: false, .. }) = self.variables.last() {
-            total_offset + size
-        } else {
-            size
+    fn add_temporary(&mut self, size: u32) -> VariableKey {
+        let total_offset = match self.last_variable.map(|x| self.variables[x]) {
+            Some(VariableOffset { total_offset, argument: false, .. }) => total_offset + size,
+            _ => size
         };
 
-        self.variables.push_idx(VariableOffset { size, total_offset, argument: false })
+        let k = self.variables.insert(VariableOffset { size, total_offset, argument: false });
+        self.last_variable = Some(k);
+        k
     }
 
     fn add_label(&mut self) -> LabelIndex {
@@ -243,28 +244,33 @@ impl Function {
     fn new(name: String, definition: &analysis::Function) -> Self {
         let mut this = Self {
             name,
-            variables: Vec::new(),
+            variables: SlotMap::new(),
+            named_variables: HashMap::new(),
+            last_variable: None,
+            return_variable: None,
             instructions: Vec::new(),
             label_num: 0,
-            return_variable: None
         };
 
         let num_args = definition.arguments.len();
         let mut total_offset = 16;
-        for v in definition.variables.values().take(num_args) {
-            this.variables.push(VariableOffset { size: v.size(), total_offset, argument: true});
+        for (name, v) in definition.variables.iter().take(num_args) {
+            let k = this.variables.insert(VariableOffset { size: v.size(), total_offset, argument: true});
+            this.named_variables.insert(name.clone(), k);
+
             total_offset += v.size();
         }
 
         let return_size = definition.return_type.size();
         if return_size > 0 {
-            this.return_variable = Some(this.variables.push_idx(VariableOffset { 
+            this.return_variable = Some(this.variables.insert(VariableOffset { 
                 size: return_size, total_offset, argument: true 
             }));
         }
 
-        for v in definition.variables.values().skip(num_args) {
-            this.add_temporary(v.size());
+        for (name, v) in definition.variables.iter().skip(num_args) {
+            let k = this.add_temporary(v.size());
+            this.named_variables.insert(name.clone(), k);
         }
 
         this

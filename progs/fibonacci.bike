@@ -4,13 +4,26 @@ func fibonacci(i32 value) -> i32 {
 	return fibonacci(value - 1) + fibonacci(value - 2);
 }
 
+func is_even(i32 value) -> bool {
+	return value % 2 == 0;
+}
+
 func main() -> void {
 	i32 idx = 0;
-	loop {
-		if idx > 10 { break };
+	i32 sum = 0;
 
-		print#(fibonacci(idx), ", ");
+	loop {
+		i32 num = fibonacci(idx);
+
+		if num > 4000000 { break };
+
+		if is_even(num) {
+			sum = sum + num;
+		};
+
 		idx = idx + 1;
 	};
+
+	print#("Sum: ", sum);
 }
 

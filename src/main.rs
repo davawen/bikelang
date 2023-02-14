@@ -32,7 +32,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     app.type_check().log_err()?;
 
-    let ir = ir::Ir::from_app(app);
+    let mut ir = ir::Ir::from_app(app);
+    ir.optimize();
+
     println!("{ir:#?}");
     println!("{}", ir.generate_asm());
 

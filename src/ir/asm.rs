@@ -12,8 +12,8 @@ fn word_size(size: u32) -> &'static str {
     }
 }
 
-fn variable_operand(func: &Function, idx: VariableIndex) -> String {
-    let var = &func.variables[idx];
+fn variable_operand(func: &Function, key: VariableKey) -> String {
+    let var = &func.variables[key];
     format!(
         "{} [rbp{}{}]",
         word_size(var.size),
@@ -302,7 +302,7 @@ impl Function {
     sub rsp, {}
 \n", 
             self.name,
-            self.variables.last().map_or(0, |v| v.total_offset)
+            self.last_variable.map_or(0, |v| self.variables[v].total_offset)
         );
 
         for ins in &self.instructions {

@@ -1,0 +1,17 @@
+func main() -> void {
+	i32 idx = 0;
+	i32 s_sum = 0;
+	i32 sum = 0;
+
+	loop {
+		if idx > 100 { break };
+
+		s_sum = s_sum + idx * idx;
+		sum = sum + idx;
+
+		idx = idx + 1;
+	};
+	sum = sum*sum;
+
+	print#("Sum of squares: ", s_sum, ", square of sum: ", sum, ", diff: ", sum - s_sum, " \n");
+}
