@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
-use crate::{ast::{Node, Intrisic, BinaryOperation, UnaryOperation}, utility::PushIndex};
+use crate::{ast::{Node, Intrisic, BinaryOperation, UnaryOperation}, utility::{PushIndex, Transmit}, typed::{TypeError, Type}};
 
 #[derive(Debug)]
 pub struct App {
@@ -27,17 +27,6 @@ pub struct FunctionBody {
     pub definition: FunctionIndex
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Type {
-    Integer32,
-    Float32,
-    Boolean,
-    String,
-    Void,
-    // For later :)
-    // Struct(TypeIndex)
-}
-
 pub type FunctionIndex = usize;
 pub type FunctionBodyIndex = usize;
 pub type VariableIndex = usize;
@@ -51,47 +40,19 @@ pub enum AnalysisError {
     Redefinition(&'static str, String),
     #[error("Unknown {0} {1}")]
     Unknown(&'static str, String),
-    #[error("Expected type {1:?}, got {2:?}: {0}")]
-    MismatchedType(&'static str, Type, Type),
     #[error("Wrong number of arguments given to function {0}: expected {1}, got {2}.")]
-    WrongArgumentNumber(String, usize, usize)
+    WrongArgumentNumber(String, usize, usize),
+    #[error("{0}")]
+    Type(TypeError)
+}
+
+impl From<TypeError> for AnalysisError {
+    fn from(value: TypeError) -> Self {
+        AnalysisError::Type(value)
+    }
 }
 
 pub type Result<T> = std::result::Result<T, AnalysisError>;
-
-impl Type {
-    /// Size of the type in bytes
-    pub fn size(&self) -> u32 {
-        use Type::*;
-        match self {
-            Integer32 => 4,
-            Float32 => 4,
-            Boolean => 1,
-            String => 8,
-            Void => 0
-        }
-    }
-
-    pub fn from_str(name: &str) -> Result<Self> {
-        use Type::*;
-        match name {
-            "i32" => Ok(Integer32),
-            "f32" => Ok(Float32),
-            "bool" => Ok(Boolean),
-            "str" => Ok(String),
-            "void" => Ok(Void),
-            _ => Err(AnalysisError::Unknown("type", name.to_owned()))
-        }
-    }
-
-    pub fn expect(self, expected: Self, msg: &'static str) -> Result<Self> {
-        if self == expected {
-            Ok(self)
-        } else {
-            Err(AnalysisError::MismatchedType(msg, expected, self))
-        }
-    }
-}
 
 impl Function {
     fn is_declaration(node: &Node) -> bool {
@@ -103,15 +64,13 @@ impl Function {
         let Node::FuncDef { name, return_type, parameter_list, body } = node
             else { return Err(AnalysisError::WrongNodeType("No function definition given...", node)) };
 
-        let return_type = Type::from_str(&return_type)?;
-
         let mut variables = IndexMap::new();
         let mut arguments = Vec::new();
 
         for v in parameter_list {
             let Node::Definition { name, typename } = v else { return Err(AnalysisError::WrongNodeType("An argument definition", v)) };
 
-            let (idx, _) = variables.insert_full(name, Type::from_str(&typename)?);
+            let (idx, _) = variables.insert_full(name, typename);
             arguments.push(idx);
         }
 
@@ -121,7 +80,7 @@ impl Function {
             match node {
                 Node::Definition { name, typename } => {
                     if !variables.contains_key(name) {
-                        variables.insert(name.clone(), Type::from_str(typename)?);
+                        variables.insert(name.clone(), typename.clone());
                     } else {
                         return Err(AnalysisError::Redefinition("variable", name.clone()));
                     }
@@ -182,7 +141,7 @@ impl Node {
             Node::StringLiteral(_) => Ok(Type::String),
             Node::Identifier(name) | Node::Definition { name, .. } => {
                 definition
-                    .variables.get(name).copied()
+                    .variables.get(name).cloned()
                     .ok_or(AnalysisError::Unknown("variable", name.to_owned()))
             }
             Node::Intrisic(intrisic) => {
@@ -195,8 +154,8 @@ impl Node {
                     Intrisic::Print(args) => {
                         for ty in args.iter().map(|node| node.get_type(app, definition)) {
                             let ty = ty?;
-                            if !matches!(ty, Type::String | Type::Integer32) {
-                                return Err(AnalysisError::MismatchedType("print intrisic cannot format the given type (expect str or i32)", Type::String, ty));
+                            if ty != Type::String && ty != Type::Integer32 {
+                                Err(TypeError::Mismatched("print intrisic cannot format the given type (expect str or i32)", Type::String, ty))?;
                             }
                         }
                     }
@@ -212,23 +171,23 @@ impl Node {
                     return Err(AnalysisError::WrongArgumentNumber(name.clone(), func.arguments.len(), parameter_list.len()))
                 }
 
-                for (param, arg) in func.arguments.iter().map(|&a| func.variables[a]) // map argument index into type index
+                for (param, arg) in func.arguments.iter().map(|&a| func.variables[a].clone()) // map argument index into type index
                     .zip(parameter_list.iter())
                 {
                     let arg = arg.get_type(app, definition)?;
                     if arg != param {
-                        return Err(AnalysisError::MismatchedType("wrong argument type to function", param, arg));
+                        return Err(TypeError::Mismatched("wrong argument type to function", param, arg)).transmit();
                     }
                 }
 
-                Ok(func.return_type)
+                Ok(func.return_type.clone())
             }
             Node::UnaryExpr { op, value } => {
                 let value = value.get_type(app, definition)?;
                 use UnaryOperation::*;
                 match op {
                     LogicalNot => value.expect(Type::Boolean, "logical operations only apply to booleans")
-                }
+                }.transmit()
             }
             Node::Expr { lhs, rhs, op: BinaryOperation::Assignment } => {
                 if !matches!(**lhs, Node::Identifier(_) | Node::Definition { .. }) { 
@@ -241,7 +200,7 @@ impl Node {
                     Ok(Type::Void)
                 }
                 else {
-                    Err(AnalysisError::MismatchedType("cannot assign value to variable", expected_type, rhs_type))
+                    Err(TypeError::Mismatched("cannot assign value to variable", expected_type, rhs_type)).transmit()
                 }
             },
             Node::Expr { lhs, rhs, op } => {
@@ -257,14 +216,14 @@ impl Node {
                     Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => if lhs == rhs {
                         Ok(Type::Boolean)
                     } else {
-                        Err(AnalysisError::MismatchedType("cannot compare different types", lhs, rhs))
+                        Err(TypeError::Mismatched("cannot compare different types", lhs, rhs))
                     }
                     LogicalAnd | LogicalOr | LogicalXor => {
                         lhs.expect(Type::Boolean, "logical operations only apply to booleans")?;
                         rhs.expect(Type::Boolean, "logical operations only apply to booleans")
                     }
                     Assignment => unreachable!()
-                }
+                }.transmit()
                 
             }
             Node::If { condition, body } => {
@@ -280,7 +239,7 @@ impl Node {
             Node::Break => Ok(Type::Void),
             Node::Return( expr ) => {
                 let out = expr.get_type(app, definition)?;
-                out.expect(definition.return_type, "return type doesn't correspond to the given function")?;
+                out.expect(definition.return_type.clone(), "return type doesn't correspond to the given function")?;
 
                 Ok(Type::Void)
             }

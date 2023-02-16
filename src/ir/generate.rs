@@ -1,4 +1,4 @@
-use crate::{ast::{self, BinaryOperation, UnaryOperation}, analysis, utility::PushIndex};
+use crate::{ast::{self, BinaryOperation, UnaryOperation}, analysis, utility::PushIndex, typed::Type};
 
 use super::*;
 
@@ -115,7 +115,7 @@ impl Function {
                 let (idx, _, called) = app.function_definitions.get_full(&name).unwrap();
                 let call = Instruction::Call {
                     func: idx,
-                    return_type: called.return_type,
+                    return_type: called.return_type.clone(),
                     parameters: parameter_list.into_iter().map(|n| self.fold_node(ir, app, func, scope, n)).collect()
                 };
                 self.instructions.push(call);
@@ -135,8 +135,8 @@ impl Function {
                         for node in values {
                             // Desugar print intrisic
                             let print = match node.get_type(app, func).unwrap() {
-                                analysis::Type::String => Intrisic::PrintString(self.fold_node(ir, app, func, scope, node)),
-                                analysis::Type::Integer32 => Intrisic::PrintNumber(self.fold_node(ir, app, func, scope, node)),
+                                Type::String => Intrisic::PrintString(self.fold_node(ir, app, func, scope, node)),
+                                Type::Integer32 => Intrisic::PrintNumber(self.fold_node(ir, app, func, scope, node)),
                                 _ => unreachable!()
                             };
 

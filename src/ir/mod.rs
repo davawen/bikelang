@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use slotmap::SlotMap;
 
-use crate::analysis;
+use crate::typed;
 
 mod generate;
 mod asm;
@@ -37,7 +37,7 @@ enum Instruction {
     Call {
         func: FunctionIndex,
         parameters: Vec<Value>,
-        return_type: analysis::Type
+        return_type: typed::Type
     },
     Ret
 }

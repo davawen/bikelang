@@ -1,0 +1,5 @@
+func main() {
+	***i32 t = 0;
+	
+	print#(t, "\n");
+}

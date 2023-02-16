@@ -1,13 +1,14 @@
+use itertools::Itertools;
 use thiserror::Error;
 
-use crate::token::{self, Dir, Token, Keyword};
+use crate::{token::{self, Dir, Token, Keyword}, typed::{Type, TypeError}};
 
 #[derive(Debug, Clone)]
 pub enum Node {
     FuncDef {
         name: String,
         parameter_list: Vec<Node>,
-        return_type: String,
+        return_type: Type,
         body: Box<Node>,
     },
     Call {
@@ -39,7 +40,7 @@ pub enum Node {
     StringLiteral(String),
     Identifier(String),
     Definition {
-        typename: String,
+        typename: Type,
         name: String,
     },
 }
@@ -88,7 +89,15 @@ pub enum ASTError {
     #[error("Intrisic {0} isn't defined in the language")]
     UknownInstric(String),
     #[error("Malformed expression")]
-    InvalidExpression
+    InvalidExpression,
+    #[error("{0}")]
+    Type(TypeError)
+}
+
+impl From<TypeError> for ASTError {
+    fn from(value: TypeError) -> Self {
+        ASTError::Type(value)
+    }
 }
 
 type Result<T> = std::result::Result<T, ASTError>;
@@ -162,6 +171,23 @@ impl Intrisic {
     }
 }
 
+fn parse_lhs(tokens: &[Token]) -> Result<Node> {
+    match tokens {
+        [typename @ .., Token::Word(name)] => {
+            if typename.is_empty() {
+                parse_expr(tokens)
+            }
+            else {
+                Ok(Node::Definition {
+                    typename: Type::from_tokens(typename)?,
+                    name: name.clone()
+                })
+            }
+        }
+        _ => parse_expr(tokens)
+    }
+}
+
 fn parse_expr(tokens: &[Token]) -> Result<Node> {
     fn parse_following_or_return_inner(
         tokens: &[Token],
@@ -187,10 +213,6 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
         [Token::Number(num)] => Ok(Node::Number(*num)),
         [Token::StringLiteral(s)] => Ok(Node::StringLiteral(s.clone())),
         [Token::Word(name)] => Ok(Node::Identifier(name.clone())),
-        [Token::Word(typename), Token::Word(name)] => Ok(Node::Definition {
-            typename: typename.clone(),
-            name: name.clone(),
-        }),
         [Token::Word(name), h @ Token::Paren(Dir::Left), following @ ..] | 
         [Token::Word(name), h @ Token::Hash, Token::Paren(Dir::Left), following @ ..] => {
             let matching = find_matching(following, Token::Paren(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
@@ -272,9 +294,14 @@ fn parse_expr(tokens: &[Token]) -> Result<Node> {
 
             if let Some((idx, op)) = op {
                 // println!("Out of {tokens:?},\nthe biggest operation is {op:?}");
+                let lhs = if let token::Operation::Assignment = op {
+                    parse_lhs(&tokens[..idx])?
+                } else {
+                    parse_expr(&tokens[..idx])?
+                };
 
                 Ok(Node::Expr {
-                    lhs: Box::new(parse_expr(&tokens[0..idx])?),
+                    lhs: Box::new(lhs),
                     rhs: Box::new(parse_expr(&tokens[(idx + 1)..])?),
                     op: BinaryOperation::from_op(*op)?,
                 })
@@ -327,7 +354,7 @@ fn parse_parameter_list(inner_tokens: &[Token]) -> Result<Vec<Node>> {
             scope <= 0 && matches!(t, Token::Comma)
         })
         .filter(|t| !t.is_empty())
-        .map(parse_expr)
+        .map(parse_lhs)
         .collect()
 }
 
@@ -381,18 +408,16 @@ pub fn parse_func_def(mut tokens: &[Token]) -> Result<Option<(Node, &[Token])>> 
 
         tokens = &tokens[(matching + 1)..];
 
-        let return_type = if let (Token::Arrow, Token::Word(return_type)) = (&tokens[0], &tokens[1])
-        {
-            tokens = &tokens[2..];
-            return_type.clone()
+        let (open_brace, _) = tokens.iter().find_position(|x| matches!(x, Token::Brace(Dir::Left)))
+            .ok_or(ASTError::ExpectedToken(Token::Brace(Dir::Left)))?;
+
+        let return_type = if let Token::Arrow = &tokens[0] {
+            Type::from_tokens(&tokens[1..open_brace])?
         } else {
-            "void".to_owned()
+            Type::Void
         };
 
-        let Token::Brace(Dir::Left) = tokens[0] else {
-            return Err(ASTError::ExpectedToken(Token::Brace(Dir::Left)));
-        };
-        tokens = &tokens[1..];
+        tokens = &tokens[(open_brace + 1)..];
 
         let body = if let Some(end_idx) = find_matching(tokens, Token::Brace(Dir::Left), false) {
             let body = parse_block(&tokens[..end_idx])?;

@@ -10,6 +10,7 @@ mod ast;
 mod analysis;
 mod ir;
 mod token;
+mod typed;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();

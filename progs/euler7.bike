@@ -12,7 +12,7 @@ func main() -> void {
 	i32 idx = 1;
 	
 	loop {
-		if idx > 10 { break };
+		if idx > 100 { break };
 
 		if is_prime(idx) {
 			print#(idx, ", ");

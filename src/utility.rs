@@ -34,3 +34,15 @@ impl<T, E: std::fmt::Display> Inspect for Result<T, E> {
         self.my_inspect_err(|e| eprintln!("{e}"))
     }
 }
+
+pub trait Transmit<T> where Self: Sized {
+    fn transmit(self) -> T;
+}
+
+impl<T, E1, E2> Transmit<Result<T, E2>> for Result<T, E1>
+    where E1: Into<E2>
+{
+    fn transmit(self) -> Result<T, E2> {
+        self.map_err(|e| e.into())
+    }
+}
