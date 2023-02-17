@@ -34,7 +34,7 @@ impl Intrisic {
         use Intrisic::*;
         match self {
             Asm(v) => v,
-            PrintNumber(v) => v,
+            PrintNumber(v, _) => v,
             PrintString(v) => v
         }
     }

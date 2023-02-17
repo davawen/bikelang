@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
-use crate::{ast::{Node, Intrisic, BinaryOperation, UnaryOperation}, utility::{PushIndex, Transmit}, typed::{TypeError, Type}};
+use crate::{ast::{Node, Intrisic, BinaryOperation, UnaryOperation}, utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType}, super_type_or};
 
 #[derive(Debug)]
 pub struct App {
@@ -42,6 +42,8 @@ pub enum AnalysisError {
     Unknown(&'static str, String),
     #[error("Wrong number of arguments given to function {0}: expected {1}, got {2}.")]
     WrongArgumentNumber(String, usize, usize),
+    #[error("Number {0} too big for storage in {1:?}.")]
+    NumberTooBig(i64, Type),
     #[error("{0}")]
     Type(TypeError)
 }
@@ -74,7 +76,7 @@ impl Function {
             arguments.push(idx);
         }
 
-        let Node::Block(body) = *body else { return Err(AnalysisError::WrongNodeType("A function body", *body)) };
+        let Node::Block(body, _) = *body else { return Err(AnalysisError::WrongNodeType("A function body", *body)) };
 
         fn get_variable_definitions(variables: &mut IndexMap<String, Type>, node: &Node) -> Result<()> {
             match node {
@@ -95,7 +97,7 @@ impl Function {
                 Node::Statement(x) => {
                     get_variable_definitions(variables, x)?;
                 }
-                Node::Block(body) | Node::Call { parameter_list: body, .. } => {
+                Node::Block(body, _) | Node::Call { parameter_list: body, .. } => {
                     for expr in body {
                         get_variable_definitions(variables, expr)?;
                     }
@@ -103,7 +105,7 @@ impl Function {
                 Node::If { body, .. } | Node::Loop { body } | Node::Return(body) => {
                     get_variable_definitions(variables, body)?;
                 }
-                Node::FuncDef { .. } | Node::Break | Node::Intrisic(_) | Node::Identifier(_) | Node::Number(_) | Node::StringLiteral(_) => ()
+                Node::FuncDef { .. } | Node::Break | Node::Intrisic(_) | Node::Identifier(..) | Node::Number(..) | Node::StringLiteral(_) | Node::Empty => ()
             };
             Ok(())
         }
@@ -135,15 +137,31 @@ impl Node {
     ///
     /// * `app`: Global application state (functions and types)
     /// * `definition`: Definition of the current function
-    pub fn get_type(&self, app: &App, definition: &Function) -> Result<Type> {
+    /// * `expect`: Type that's expected from the node, for simple coercions
+    pub fn set_type(&mut self, app: &App, definition: &Function, expect: Option<&Type>) -> Result<Type> {
         match self {
-            Node::Number(_) => Ok(Type::Integer32),
+            Node::Number(value, ty) => {
+                *ty = Type::Integer32;
+                if let Some(expect) = expect {
+                    if SuperType::Integer.verify(expect) || (SuperType::Ptr.verify(expect) && *value == 0) {
+                        *ty = expect.clone();
+                    }
+                }
+
+                if *value < 2_i64.saturating_pow(ty.size()*8) {
+                    Ok(ty.clone())
+                } else {
+                    Err(AnalysisError::NumberTooBig(*value, ty.clone()))
+                }
+            },
             Node::StringLiteral(_) => Ok(Type::String),
-            Node::Identifier(name) | Node::Definition { name, .. } => {
-                definition
+            Node::Identifier(name, typename) => {
+                *typename = definition
                     .variables.get(name).cloned()
-                    .ok_or(AnalysisError::Unknown("variable", name.to_owned()))
+                    .ok_or(AnalysisError::Unknown("variable", name.to_owned()))?;
+                Ok(typename.clone())
             }
+            Node::Definition { name, typename } => Ok(typename.clone()),
             Node::Intrisic(intrisic) => {
                 match intrisic {
                     Intrisic::Asm(x) => {
@@ -152,18 +170,19 @@ impl Node {
                         }
                     },
                     Intrisic::Print(args) => {
-                        for ty in args.iter().map(|node| node.get_type(app, definition)) {
+                        for ty in args.iter_mut().map(|node| node.set_type(app, definition, None)) {
                             let ty = ty?;
-                            if ty != Type::String && ty != Type::Integer32 {
-                                Err(TypeError::Mismatched("print intrisic cannot format the given type (expect str or i32)", Type::String, ty))?;
-                            }
+                            ty.expect(
+                                super_type_or!(Type::String, SuperType::Integer),
+                                "print intrisic cannot format the given type"
+                            )?;
                         }
                     }
                 }
 
                 Ok(Type::Void)
             }
-            Node::Call { name, parameter_list, .. } => {
+            Node::Call { name, parameter_list, return_type } => {
                 let func = app.function_definitions.get(name)
                     .ok_or(AnalysisError::Unknown("function", name.clone()))?;
 
@@ -172,103 +191,132 @@ impl Node {
                 }
 
                 for (param, arg) in func.arguments.iter().map(|&a| func.variables[a].clone()) // map argument index into type index
-                    .zip(parameter_list.iter())
+                    .zip(parameter_list.iter_mut())
                 {
-                    let arg = arg.get_type(app, definition)?;
-                    if arg != param {
-                        return Err(TypeError::Mismatched("wrong argument type to function", param, arg)).transmit();
-                    }
+                    let arg = arg.set_type(app, definition, Some(&param))?;
+                    arg.expect(param.into(), "wrong argument type to function")?;
                 }
 
+                *return_type = func.return_type.clone();
                 Ok(func.return_type.clone())
             }
-            Node::UnaryExpr { op, value } => {
-                let value = value.get_type(app, definition)?;
-                use UnaryOperation::*;
-                match op {
-                    LogicalNot => value.expect(Type::Boolean, "logical operations only apply to booleans"),
-                    _ => panic!()
-                }.transmit()
-            }
-            Node::Expr { lhs, rhs, op: BinaryOperation::Assignment } => {
-                if !matches!(**lhs, Node::Identifier(_) | Node::Definition { .. }) { 
-                    return Err(AnalysisError::WrongNodeType("a variable definition", *lhs.clone())) 
-                }
-                let expected_type = lhs.get_type(app, definition)?;
-                let rhs_type = rhs.get_type(app, definition)?;
+            Node::UnaryExpr { op, ty, value } => {
+                let value = value.set_type(app, definition, expect)?;
 
-                if rhs_type == expected_type {
-                    Ok(Type::Void)
+                use UnaryOperation::*;
+                *ty = match op {
+                    LogicalNot => value.expect(Type::Boolean.into(), "logical operations only apply to booleans"),
+                    Negation => value.expect(SuperType::Number, "math operations only operate on numbers"),
+                    Deref => match value {
+                        Type::Ptr(t) => Ok(*t),
+                        value => value.expect(SuperType::Ptr, "dereference takes a pointer")
+                    }
+                }?;
+                
+                Ok(ty.clone())
+            }
+            Node::Expr { op: BinaryOperation::Assignment, ty: _, lhs, rhs } => {
+                match &**lhs {
+                    Node::Identifier(..) | Node::Definition { .. } | Node::UnaryExpr { op: UnaryOperation::Deref, .. } => (),
+                    _ => {
+                        Err(AnalysisError::WrongNodeType("given node isn't assignable to", (**lhs).clone()))?;
+                    }
                 }
-                else {
-                    Err(TypeError::Mismatched("cannot assign value to variable", expected_type, rhs_type)).transmit()
-                }
+
+                let expected_type = lhs.set_type(app, definition, None)?;
+                let rhs_type = rhs.set_type(app, definition, Some(&expected_type))?;
+
+                rhs_type.expect(expected_type.into(), "cannot assign value to variable")?;
+                Ok(Type::Void)
             },
-            Node::Expr { lhs, rhs, op } => {
-                let lhs = lhs.get_type(app, definition)?;
-                let rhs = rhs.get_type(app, definition)?;
+            Node::Expr { op, ty, lhs, rhs } => {
+                let lhs = lhs.set_type(app, definition, expect)?;
+                let rhs = rhs.set_type(app, definition, expect)?;
 
                 use BinaryOperation::*;
-                match op {
+                *ty = match op {
                     Add | Sub | Div | Mul | Modulus => {
-                        lhs.expect(Type::Integer32, "math operations only apply to numbers")?;
-                        rhs.expect(Type::Integer32, "math operations only apply to numbers")
+                        lhs.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers")?;
+                        rhs.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers")?;
+
+                        let ptr = SuperType::Ptr;
+                        Ok(
+                            if ptr.verify(&lhs) { lhs }
+                            else if ptr.verify(&rhs) { rhs }
+                            else { [ lhs, rhs ].into_iter().max_by_key(|x| x.size()).unwrap() }
+                        )
                     }
-                    Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => if lhs == rhs {
+                    Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => {
+                        rhs.expect(lhs.into(), "cannot compare different types")?;
                         Ok(Type::Boolean)
-                    } else {
-                        Err(TypeError::Mismatched("cannot compare different types", lhs, rhs))
                     }
                     LogicalAnd | LogicalOr | LogicalXor => {
-                        lhs.expect(Type::Boolean, "logical operations only apply to booleans")?;
-                        rhs.expect(Type::Boolean, "logical operations only apply to booleans")
+                        lhs.expect(Type::Boolean.into(), "logical operations only apply to booleans")?;
+                        rhs.expect(Type::Boolean.into(), "logical operations only apply to booleans")
                     }
                     Assignment => unreachable!()
-                }.transmit()
-                
+                }?;
+
+                Ok(ty.clone())
             }
             Node::If { condition, body } => {
-                let condition = condition.get_type(app, definition)?;
-                condition.expect(Type::Boolean, "if statement condition needs to be boolean")?;
+                let condition = condition.set_type(app, definition, None)?;
+                condition.expect(Type::Boolean.into(), "if statement condition needs to be boolean")?;
 
-                body.get_type(app, definition)
+                body.set_type(app, definition, None)?;
+                Ok(Type::Void)
             }
             Node::Loop { body } => {
-                body.get_type(app, definition)?;
+                body.set_type(app, definition, None)?;
                 Ok(Type::Void)
             }
             Node::Break => Ok(Type::Void),
             Node::Return( expr ) => {
-                let out = expr.get_type(app, definition)?;
-                out.expect(definition.return_type.clone(), "return type doesn't correspond to the given function")?;
+                let out = expr.set_type(app, definition, Some(&definition.return_type))?;
+                out.expect(definition.return_type.clone().into(), "return type doesn't correspond to the given function")?;
 
                 Ok(Type::Void)
             }
-            Node::Block(nodes) => {
-                let mut nodes = nodes.iter().peekable();
-                while let Some(node) = nodes.next() {
-                    if nodes.peek().is_none() {
-                        return node.get_type(app, definition);
+            Node::Block(body, ty) => {
+                let mut body = body.iter_mut().peekable();
+                while let Some(node) = body.next() {
+                    if body.peek().is_none() {
+                        *ty = node.set_type(app, definition, expect)?;
                     }
-                    node.get_type(app, definition)?;
+                    node.set_type(app, definition, None)?;
                 }
-                Ok(Type::Void) 
+
+                Ok(ty.clone()) 
             }
             Node::Statement( inner ) => {
-                inner.get_type(app, definition)?;
+                inner.set_type(app, definition, None)?;
                 Ok(Type::Void)
             }
+            Node::Empty => Ok(Type::Void),
             Node::FuncDef { .. } => {
                 Err(AnalysisError::WrongNodeType("something that isn't a function definition what the fuck", self.clone()))
             }
         }
     }
+
+    pub fn get_type(&self) -> &Type {
+        match self {
+            Node::Call { return_type, .. } => return_type,
+            Node::UnaryExpr { ty, .. } => ty,
+            Node::Expr { ty, .. } => ty,
+            Node::Block(_, ty) => ty,
+            Node::Number(_, ty) => ty,
+            Node::StringLiteral(_) => &Type::String,
+            Node::Identifier(_, ty) => ty,
+            _ => &Type::Void
+        }
+    }
 }
 
 impl FunctionBody {
-    fn type_check(&self, app: &App) -> Result<()> {
-        for statement in self.iter() {
-            statement.get_type(app, &app.function_definitions[self.definition])?;
+    fn type_check(&mut self, app: &App) -> Result<()> {
+        for statement in self.body.iter_mut() {
+            statement.set_type(app, &app.function_definitions[self.definition], None)?;
         }
         Ok(())
     }
@@ -292,7 +340,7 @@ impl App {
     }
 
     pub fn insert_declarations(&mut self, root: Node) -> Result<()> {
-        let Node::Block(root) = root else { Err(AnalysisError::WrongNodeType("A list of top-level statements", root.clone()))? };
+        let Node::Block(root, _) = root else { Err(AnalysisError::WrongNodeType("A list of top-level statements", root.clone()))? };
 
         for statement in root {
             if Function::is_declaration(&statement) {
@@ -303,10 +351,20 @@ impl App {
         Ok(())
     }
 
-    pub fn type_check(&self) -> Result<()> {
-        for function in &self.function_bodies {
-            function.type_check(self)?;
+    pub fn type_check(mut self) -> Result<Self> {
+        // We do a little trickery
+        // Allow borrowing the function definitions without borrowing self
+        // We don't need the bodies during type checking anyway
+        let this = App {
+            function_definitions: self.function_definitions,
+            function_bodies: Vec::new()
+        };
+
+        for function in &mut self.function_bodies {
+            function.type_check(&this)?;
         }
-        Ok(())
+
+        self.function_definitions = this.function_definitions;
+        Ok(self)
     }
 }

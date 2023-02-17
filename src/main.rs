@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.insert_declarations(ast).log_err()?;
     println!("{app:#?}");
 
-    app.type_check().log_err()?;
+    let app = app.type_check().log_err()?;
 
     let mut ir = ir::Ir::from_app(app);
     ir.optimize();

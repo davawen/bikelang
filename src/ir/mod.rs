@@ -72,13 +72,13 @@ enum Arithmetic {
 #[derive(Debug)]
 enum Intrisic {
     Asm(Value),
-    PrintNumber(Value),
+    PrintNumber(Value, u32),
     PrintString(Value)
 }
 
 #[derive(Debug)]
 enum Value {
-    Number(i32),
+    Number(i64, u32),
     Literal(LiteralIndex),
     Boolean(bool),
     VariableLoad(VariableKey),

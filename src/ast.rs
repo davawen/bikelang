@@ -11,13 +11,16 @@ pub enum Node {
     Call {
         name: String,
         parameter_list: Vec<Node>,
+        return_type: Type
     },
     UnaryExpr {
         op: UnaryOperation,
+        ty: Type,
         value: Box<Node>
     },
     Expr {
         op: BinaryOperation,
+        ty: Type,
         lhs: Box<Node>,
         rhs: Box<Node>
     },
@@ -32,10 +35,11 @@ pub enum Node {
     Return(Box<Node>),
     Intrisic(Intrisic),
     Statement(Box<Node>),
-    Block(Vec<Node>),
-    Number(i32),
+    Empty,
+    Block(Vec<Node>, Type),
+    Number(i64, Type),
     StringLiteral(String),
-    Identifier(String),
+    Identifier(String, Type),
     Definition {
         typename: Type,
         name: String,
@@ -119,9 +123,9 @@ impl Token {
     fn nud(self, lexer: &mut Lexer) -> Node {
         use Token::*;
         match self {
-            Number(n) => Node::Number(n),
+            Number(n) => Node::Number(n, Type::Void),
             StringLiteral(s) => Node::StringLiteral(s),
-            Word(name) => Node::Identifier(name),
+            Word(name) => Node::Identifier(name, Type::Void),
             Op(op) => {
                 let (op, power) = match op {
                     Operation::Minus => (UnaryOperation::Negation, 60),
@@ -131,6 +135,7 @@ impl Token {
                 };
                 Node::UnaryExpr {
                     op,
+                    ty: Type::Void,
                     value: Box::new(expression(lexer, power))
                 }
             }
@@ -177,9 +182,9 @@ impl Token {
                 ex
             }
             Brace(Dir::Left) => {
-                Node::Block(parse_block(lexer))
+                Node::Block(parse_block(lexer), Type::Void)
             }
-            Semicolon => Node::Statement(Box::new(Node::Number(0))),
+            Semicolon => Node::Empty,
             _ => unreachable!("{self:#?}")
         }
     }
@@ -210,6 +215,7 @@ impl Token {
 
                 Node::Expr {
                     op,
+                    ty: Type::Void,
                     lhs: Box::new(left),
                     rhs: Box::new(expression(lexer, power))
                 }
@@ -221,15 +227,16 @@ impl Token {
                 }
             }
             Paren(Dir::Left) => { // parenthesis operator = function call
-                let Node::Identifier(name) = left else { unreachable!("{left:#?}") };
+                let Node::Identifier(name, _) = left else { unreachable!("{left:#?}") };
 
                 Node::Call {
                     name,
+                    return_type: Type::Void,
                     parameter_list: parameter_list(lexer)
                 }
             }
             Hash => {
-                let Node::Identifier(name) = left else { unreachable!("{left:#?}") };
+                let Node::Identifier(name, _) = left else { unreachable!("{left:#?}") };
 
                 lexer.expect(Token::Paren(Dir::Left));
                 let list = parameter_list(lexer);
@@ -295,5 +302,5 @@ pub fn parse_ast(lexer: &mut Lexer) -> Node {
     while lexer.peek() != &Token::Eof {
         root.push(expression(lexer, 0));
     }
-    Node::Block(root)
+    Node::Block(root, Type::Void)
 }

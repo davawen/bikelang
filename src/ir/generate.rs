@@ -1,4 +1,4 @@
-use crate::{ast::{self, BinaryOperation, UnaryOperation}, analysis, utility::PushIndex, typed::Type};
+use crate::{ast::{self, BinaryOperation, UnaryOperation}, analysis, utility::PushIndex, typed::{Type, SuperType}};
 
 use super::*;
 
@@ -61,8 +61,8 @@ impl Function {
     /// Invariant: app's function_bodies can't be used!
     fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, func: &analysis::Function, scope: &[Scope], node: ast::Node) -> Value {
         match node {
-            ast::Node::Expr { lhs, rhs, op: BinaryOperation::Assignment } => {
-                let (ast::Node::Identifier(var) | ast::Node::Definition { name: var, .. }) = *lhs
+            ast::Node::Expr { op: BinaryOperation::Assignment, ty: _, lhs, rhs } => {
+                let (ast::Node::Identifier(var, _) | ast::Node::Definition { name: var, .. }) = *lhs
                 else { 
                     todo!("Can only assign values to variables for now")
                 };
@@ -74,7 +74,7 @@ impl Function {
 
                 Value::NoValue
             }
-            ast::Node::UnaryExpr { op, value } => {
+            ast::Node::UnaryExpr { op, ty: _, value } => {
                 let value = self.fold_node(ir, app, func, scope, *value);
                 let temporary = self.add_temporary(1);
 
@@ -87,7 +87,7 @@ impl Function {
                 self.instructions.push(ins);
                 Value::VariableLoad(temporary)
             }
-            ast::Node::Expr { lhs, rhs, op } => {
+            ast::Node::Expr { op, ty: _, lhs, rhs } => {
                 let lhs = self.fold_node(ir, app, func, scope, *lhs);
                 let rhs = self.fold_node(ir, app, func, scope, *rhs);
 
@@ -112,19 +112,21 @@ impl Function {
                 self.instructions.push(ins);
                 Value::VariableLoad(temporary)
             }
-            ast::Node::Call { name, parameter_list } => {
-                let (idx, _, called) = app.function_definitions.get_full(&name).unwrap();
+            ast::Node::Call { name, parameter_list, return_type } => {
+                let idx = app.function_definitions.get_index_of(&name).unwrap();
+
+                let return_size = return_type.size();
                 let call = Instruction::Call {
                     func: idx,
-                    return_type: called.return_type.clone(),
+                    return_type,
                     parameters: parameter_list.into_iter().map(|n| self.fold_node(ir, app, func, scope, n)).collect()
                 };
                 self.instructions.push(call);
 
-                if called.return_type.size() > 0 {
-                    let temporary = self.add_temporary(called.return_type.size());
+                if return_size > 0 {
+                    let temporary = self.add_temporary(return_size);
                     self.instructions.push(
-                        Instruction::VariableStore(temporary, Value::LastCall { size: called.return_type.size() })
+                        Instruction::VariableStore(temporary, Value::LastCall { size: return_size })
                     );
 
                     Value::VariableLoad(temporary)
@@ -142,9 +144,9 @@ impl Function {
                     ast::Intrisic::Print(values) => {
                         for node in values {
                             // Desugar print intrisic
-                            let print = match node.get_type(app, func).unwrap() {
+                            let print = match node.get_type().clone() {
                                 Type::String => Intrisic::PrintString(self.fold_node(ir, app, func, scope, node)),
-                                Type::Integer32 => Intrisic::PrintNumber(self.fold_node(ir, app, func, scope, node)),
+                                ty if SuperType::Integer.verify(&ty) => Intrisic::PrintNumber(self.fold_node(ir, app, func, scope, node), ty.size()),
                                 _ => unreachable!()
                             };
 
@@ -159,7 +161,7 @@ impl Function {
                 let idx = self.add_label();
 
                 let jump = match *condition { 
-                    ast::Node::Expr { op, lhs, rhs } if op.is_comparison() => {
+                    ast::Node::Expr { op, ty: _, lhs, rhs} if op.is_comparison() => {
                         let lhs = self.fold_node(ir, app, func, scope, *lhs);
                         let rhs = self.fold_node(ir, app, func, scope, *rhs);
                         Comparison::from_op(op, lhs, rhs).inverse() // Skip the function's body if the condition is NOT true
@@ -207,7 +209,7 @@ impl Function {
 
                 Value::NoValue
             }
-            ast::Node::Block(nodes) => {
+            ast::Node::Block(nodes, _) => {
                 let scope = &[scope, &[Scope::Block]].concat();
                 let mut it = nodes.into_iter().peekable();
                 while let Some(node) = it.next() {
@@ -225,10 +227,12 @@ impl Function {
                 self.fold_node(ir, app, func, scope, *inner);
                 Value::NoValue
             }
-            ast::Node::Identifier(var) => Value::VariableLoad(self.named_variables[&var]),
-            ast::Node::Number(n) => Value::Number(n),
+            ast::Node::Empty => Value::NoValue,
+            ast::Node::Identifier(var, _) => Value::VariableLoad(self.named_variables[&var]),
+            ast::Node::Number(n, ty) => Value::Number(n, ty.size()),
             ast::Node::StringLiteral(s) => Value::Literal(ir.push_literal(s)),
-            ast::Node::FuncDef { .. } | ast::Node::Definition { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {node:#?}"),
+            ast::Node::Definition { .. } => Value::NoValue,
+            ast::Node::FuncDef { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {node:#?}"),
         }
     }
 

@@ -18,7 +18,7 @@ pub enum Token {
     Op(Operation),
 
     Word(String),
-    Number(i32),
+    Number(i64),
     StringLiteral(String),
 
     Eof,
@@ -54,20 +54,6 @@ pub enum Operation {
     Times,
     Div,
     Modulus
-}
-
-impl Operation {
-    pub fn precedence(&self) -> u32 {
-        use Operation::*;
-        match self {
-            Exclamation => 1,
-            Times | Div | Modulus => 2,
-            Plus | Minus => 3,
-            Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => 4,
-            LogicalAnd | LogicalOr | LogicalXor => 5,
-            Assignment => 6
-        }
-    }
 }
 
 impl From<Keyword> for Token {
@@ -125,7 +111,7 @@ impl Lexer {
                         "loop" => Some(Keyword::Loop.into()),
                         "break" => Some(Keyword::Break.into()),
                         "return" => Some(Keyword::Return.into()),
-                        _ => match word.parse::<i32>() {
+                        _ => match word.parse::<i64>() {
                             Ok(num) => Some(Token::Number(num)),
                             Err(_) => Some(Token::Word(word)),
                         },

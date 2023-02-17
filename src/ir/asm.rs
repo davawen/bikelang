@@ -81,7 +81,7 @@ impl Register {
 impl Value {
     fn as_operand(&self, func: &Function) -> String {
         match self {
-            Value::Number(x) => format!("{} {x}", word_size(4)),
+            &Value::Number(x, size) => format!("{} {x}", word_size(size)),
             &Value::VariableLoad(idx) => variable_operand(func, idx),
             &Value::LastCall { size } => format!("{} [rsp]", word_size(size)),
             &Value::Boolean(x) => if x { "BYTE 1".to_owned() } else { "BYTE 0".to_owned() },
@@ -96,7 +96,7 @@ impl Value {
 
     fn is_memory_access(&self) -> bool {
         match self {
-            Value::Number(_) | Value::Boolean(_) => false,
+            Value::Number(..) | Value::Boolean(_) => false,
             Value::VariableLoad(_) | Value::LastCall { .. } => true,
             Value::NoValue | Value::Literal(_) => unreachable!("{self:#?}")
         }
@@ -113,7 +113,7 @@ impl Value {
 
     fn size(&self, func: &Function) -> u32 {
         match self {
-            Value::Number(_) => 4,
+            &Value::Number(_, size) => size,
             Value::VariableLoad(idx) => func.variables[*idx].size,
             Value::Boolean(_) => 1,
             &Value::LastCall { size } => size,
@@ -228,9 +228,9 @@ impl Intrisic {
             Asm(Value::Literal(inner)) => {
                 ir.literals[*inner].clone()
             }
-            PrintNumber(v) => {
+            PrintNumber(v, size) => {
                 let rax = Register::Rax.as_str(v.size(func));
-                format!("mov {rax}, {}\ncall __builtin_print_number4", v.as_operand(func))
+                format!("mov {rax}, {}\ncall __builtin_print_number{size}", v.as_operand(func))
             },
             PrintString(Value::Literal(idx)) => {
                 let literal = &ir.literals[*idx];
