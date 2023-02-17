@@ -1,7 +1,13 @@
 func main() {
-	i32 n = 0;
-
-
+	i32 n = 12;
 	*i32 ptr = 0;
-	i32 x = *(ptr + 10);
+
+	asm#("
+lea rax, [rbp-4]
+mov QWORD [rbp-12], rax
+	");
+
+	//*ptr = 15;
+
+	print#("-n: ", -*ptr);
 }

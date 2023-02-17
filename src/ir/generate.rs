@@ -74,17 +74,18 @@ impl Function {
 
                 Value::NoValue
             }
-            ast::Node::UnaryExpr { op, ty: _, value } => {
+            ast::Node::UnaryExpr { op, ty, value } => {
                 let value = self.fold_node(ir, app, func, scope, *value);
-                let temporary = self.add_temporary(1);
 
+                let temporary = self.add_temporary(ty.size());
                 use UnaryOperation::*;
-                let ins = match op {
-                    LogicalNot => Instruction::StoreOperation(temporary, Arithmetic::Not(value)),
-                    _ => panic!()
+                let op = match op {
+                    LogicalNot => Arithmetic::Not(value),
+                    Deref => Arithmetic::Deref(value, ty.size()),
+                    Negation => Arithmetic::Negate(value)
                 };
 
-                self.instructions.push(ins);
+                self.instructions.push(Instruction::StoreOperation(temporary, op));
                 Value::VariableLoad(temporary)
             }
             ast::Node::Expr { op, ty: _, lhs, rhs } => {

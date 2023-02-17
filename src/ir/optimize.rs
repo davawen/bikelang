@@ -12,7 +12,7 @@ impl Arithmetic {
     fn as_values(&self) -> Vec<&Value> {
         use Arithmetic::*;
         match self {
-            Not(x) => vec![x],
+            Not(x) | Negate(x) | Deref(x, _) => vec![x],
             Add(a, b) | Sub(a, b) | Mul(a, b) | Div(a, b) | Modulus(a, b) | And(a, b) | Or(a, b) | Xor(a, b) => vec![a, b]
         }
     }

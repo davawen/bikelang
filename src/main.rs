@@ -23,14 +23,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut lexer = Lexer::new(&source);
 
     let ast = parse_ast(&mut lexer);
-    println!("{ast:#?}");
+    // println!("{ast:#?}");
 
     let mut app = analysis::App::new();
 
     app.insert_declarations(ast).log_err()?;
-    println!("{app:#?}");
-
     let app = app.type_check().log_err()?;
+
+    println!("{app:#?}");
 
     let mut ir = ir::Ir::from_app(app);
     ir.optimize();

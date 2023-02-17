@@ -14,6 +14,11 @@ pub struct Ir {
     literals: Vec<String>
 }
 
+type FunctionIndex = usize;
+type VariableKey = slotmap::DefaultKey;
+type LiteralIndex = usize;
+type LabelIndex = usize;
+
 #[derive(Debug)]
 struct Function {
     name: String,
@@ -66,7 +71,9 @@ enum Arithmetic {
     And(Value, Value),
     Or(Value, Value),
     Xor(Value, Value),
-    Not(Value)
+    Not(Value),
+    Negate(Value),
+    Deref(Value, u32)
 }
 
 #[derive(Debug)]
@@ -102,8 +109,3 @@ pub struct VariableOffset {
     /// Wether this variable is an argument (is it stored in this stack frame or in the parent one)
     pub argument: bool
 }
-
-type FunctionIndex = usize;
-type VariableKey = slotmap::DefaultKey;
-type LiteralIndex = usize;
-type LabelIndex = usize;

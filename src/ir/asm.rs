@@ -147,14 +147,6 @@ impl Arithmetic {
                     rhs.as_operand(func)
                 ))
             }
-            Not(v) => {
-                let size = v.size(func);
-                let rax = Register::Rax.as_str(size);
-                (rax, format!(
-                    "mov {rax}, {}\nxor {rax}, 1\n", 
-                    v.as_operand(func)
-                ))
-            }
             Div(lhs, rhs) | Modulus(lhs, rhs)  => {
                 let rax = Register::Rax.as_str(lhs.size(func));
                 let r8 = Register::R8.as_str(lhs.size(func));
@@ -165,6 +157,30 @@ impl Arithmetic {
                     lhs.as_operand(func),
                     rhs.as_operand(func),
                     if matches!(self, Modulus(..)) { "\nmov rax, rdx" } else { "" }
+                ))
+            }
+            Not(v) => {
+                let size = v.size(func);
+                let rax = Register::Rax.as_str(size);
+                (rax, format!(
+                    "mov {rax}, {}\nxor {rax}, 1\n", 
+                    v.as_operand(func)
+                ))
+            }
+            Negate(v) => {
+                let size = v.size(func);
+                let rax = Register::Rax.as_str(size);
+                (rax, format!(
+                    "mov {rax}, {}\nneg {rax}\n",
+                    v.as_operand(func)
+                ))
+            }
+            Deref(v, size) => {
+                let rax_out = Register::Rax.as_str(*size);
+                (rax_out, format!(
+                    "mov rax, {}\nmov {rax_out}, {} [rax]\n",
+                    v.as_operand(func),
+                    word_size(*size)
                 ))
             }
         }
@@ -326,8 +342,16 @@ impl Ir {
             let rax = Register::Rax.as_str(size);
             let rdx = Register::Rdx.as_str(size);
             let r8 = Register::R8.as_str(size);
+            let r9 = Register::R9.as_str(size);
             out.push_str(&format!("
 __builtin_print_number{size}:
+    mov {r9}, {rax} ; save full number for later
+    test {rax}, {rax}
+    jns .positive
+
+    neg rax
+
+    .positive:
     mov rcx, 0
     .loop:
         xor {rdx}, {rdx} ; nullify rdx
@@ -346,7 +370,14 @@ __builtin_print_number{size}:
         inc rcx
         cmp rax, 0
         jnz .loop
+    
+    test {r9}, {r9}
+    jns .positive1
+    sub rsp, 1
+    mov BYTE [rsp], '-' ; show negative numbers
+    inc rcx
 
+    .positive1:
     push rcx ; save rcx for cleanup
 
     ; the stack grows downwards, so the characters pushed in reverse order are now in the good order
