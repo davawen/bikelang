@@ -186,7 +186,8 @@ impl Node {
                 let value = value.get_type(app, definition)?;
                 use UnaryOperation::*;
                 match op {
-                    LogicalNot => value.expect(Type::Boolean, "logical operations only apply to booleans")
+                    LogicalNot => value.expect(Type::Boolean, "logical operations only apply to booleans"),
+                    _ => panic!()
                 }.transmit()
             }
             Node::Expr { lhs, rhs, op: BinaryOperation::Assignment } => {

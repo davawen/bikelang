@@ -80,7 +80,8 @@ impl Function {
 
                 use UnaryOperation::*;
                 let ins = match op {
-                    LogicalNot => Instruction::StoreOperation(temporary, Arithmetic::Not(value))
+                    LogicalNot => Instruction::StoreOperation(temporary, Arithmetic::Not(value)),
+                    _ => panic!()
                 };
 
                 self.instructions.push(ins);
@@ -120,10 +121,17 @@ impl Function {
                 };
                 self.instructions.push(call);
 
-                let temporary = self.add_temporary(called.return_type.size());
-                self.instructions.push(Instruction::VariableStore(temporary, Value::LastCall { size: called.return_type.size() }));
+                if called.return_type.size() > 0 {
+                    let temporary = self.add_temporary(called.return_type.size());
+                    self.instructions.push(
+                        Instruction::VariableStore(temporary, Value::LastCall { size: called.return_type.size() })
+                    );
 
-                Value::VariableLoad(temporary)
+                    Value::VariableLoad(temporary)
+                }
+                else {
+                    Value::NoValue
+                }
             }
             ast::Node::Intrisic(i) => {
                 match i {

@@ -8,7 +8,7 @@ fn word_size(size: u32) -> &'static str {
         2 => "WORD",
         4 => "DWORD",
         8 => "QWORD",
-        _ => unreachable!("Invalid word size")
+        _ => unreachable!("Invalid word size: {size}")
     }
 }
 

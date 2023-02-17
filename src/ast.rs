@@ -1,7 +1,4 @@
-use itertools::Itertools;
-use thiserror::Error;
-
-use crate::{token::{self, Dir, Token, Keyword}, typed::{Type, TypeError}};
+use crate::{typed::Type, token::{Token, Lexer, Operation, Dir, self}};
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -53,6 +50,8 @@ pub enum Intrisic {
 
 #[derive(Debug, Clone, Copy)]
 pub enum UnaryOperation {
+    Negation,
+    Deref,
     LogicalNot
 }
 
@@ -78,59 +77,7 @@ pub enum BinaryOperation {
     Modulus
 }
 
-#[derive(Debug, Error)]
-pub enum ASTError {
-    #[error("Unexpected token {0:?}")]
-    UnexpectedToken(Token),
-    #[error("Expected token {0:?}")]
-    ExpectedToken(Token),
-    #[error("Malformed intrisic: {0}")]
-    MalformedIntrisic(&'static str),
-    #[error("Intrisic {0} isn't defined in the language")]
-    UknownInstric(String),
-    #[error("Malformed expression")]
-    InvalidExpression,
-    #[error("{0}")]
-    Type(TypeError)
-}
-
-impl From<TypeError> for ASTError {
-    fn from(value: TypeError) -> Self {
-        ASTError::Type(value)
-    }
-}
-
-type Result<T> = std::result::Result<T, ASTError>;
-
-impl UnaryOperation {
-    fn from_op(op: token::Operation) -> Result<Self> {
-        use token::Operation::*;
-        match op {
-            LogicalNot => Ok(UnaryOperation::LogicalNot),
-            _ => Err(ASTError::InvalidExpression)
-        }
-    }
-}
-
 impl BinaryOperation {
-    fn from_op(op: token::Operation) -> Result<Self> {
-        macro_rules! map {
-            ($($x:ident),+) => {
-                match op {
-                    $(token::Operation::$x => Ok(BinaryOperation::$x),)+
-                    _ => Err(ASTError::InvalidExpression)
-                }
-            };
-        }
-
-        map!(
-            Assignment,
-            Equals, NotEquals, Greater, GreaterOrEquals, Lesser, LesserOrEquals,
-            LogicalAnd, LogicalOr, LogicalXor,
-            Add, Sub, Mul, Div, Modulus
-        )
-    }
-
     pub fn is_comparison(&self) -> bool {
         use BinaryOperation::*;
         matches!(self, Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals)
@@ -147,312 +94,206 @@ impl BinaryOperation {
     }
 }
 
-impl Intrisic {
-    fn from_parameters(name: &str, parameters: Vec<Node>) -> Result<Self> {
-        match name {
-            "asm" => {
-                if let Some(s) = parameters.into_iter().next() {
-                    Ok(Self::Asm(Box::new(s)))
-                }
-                else {
-                    Err(ASTError::MalformedIntrisic("no argument given to asm intrisic"))
-                }
+impl Token {
+    fn left_binding_power(&self) -> u32 {
+        use Token::*;
+        use Operation::*;
+        match self {
+            Op(op) => match op {
+                Assignment => 10,
+                LogicalAnd | LogicalOr | LogicalXor => 20,
+                Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => 30,
+                Plus | Minus => 40,
+                Times | Div | Modulus => 50,
+                Exclamation => unreachable!()
             }
-            "print" => {
-                if !parameters.is_empty() {
-                    Ok(Self::Print(parameters))
-                }
-                else {
-                    Err(ASTError::MalformedIntrisic("no argument given to print intrisic"))
-                }
-            }
-            name => Err(ASTError::UknownInstric(name.to_owned()))
-        }
-    }
-}
-
-fn parse_lhs(tokens: &[Token]) -> Result<Node> {
-    match tokens {
-        [typename @ .., Token::Word(name)] => {
-            if typename.is_empty() {
-                parse_expr(tokens)
-            }
-            else {
-                Ok(Node::Definition {
-                    typename: Type::from_tokens(typename)?,
-                    name: name.clone()
-                })
-            }
-        }
-        _ => parse_expr(tokens)
-    }
-}
-
-fn parse_expr(tokens: &[Token]) -> Result<Node> {
-    fn parse_following_or_return_inner(
-        tokens: &[Token],
-        end_inner: usize,
-        inner_expression: Node,
-    ) -> Result<Node> {
-        if let Some(Token::Op(op)) = tokens.get(end_inner + 1) {
-            let rhs = &tokens[(end_inner + 2)..];
-
-            Ok(Node::Expr {
-                lhs: Box::new(inner_expression),
-                rhs: Box::new(parse_expr(rhs)?),
-                op: BinaryOperation::from_op(*op)?,
-            })
-        }
-        // Else just return the content of the parenthesis
-        else {
-            Ok(inner_expression)
+            Paren(Dir::Left) => 70, // operator ()
+            Hash => 70,
+            Word(_) => 5, // type binding
+            Brace(Dir::Left) => 1, // allow stopping at opening brace
+            Paren(Dir::Right) | Brace(Dir::Right) | Keyword(_) | Comma | Semicolon | Eof => 0,
+            _ => unreachable!("{self:#?}")
         }
     }
 
-    match tokens {
-        [Token::Number(num)] => Ok(Node::Number(*num)),
-        [Token::StringLiteral(s)] => Ok(Node::StringLiteral(s.clone())),
-        [Token::Word(name)] => Ok(Node::Identifier(name.clone())),
-        [Token::Word(name), h @ Token::Paren(Dir::Left), following @ ..] | 
-        [Token::Word(name), h @ Token::Hash, Token::Paren(Dir::Left), following @ ..] => {
-            let matching = find_matching(following, Token::Paren(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
-
-            let parameter_list = &following[..matching];
-
-            let arg_list = parse_parameter_list(parameter_list)?;
-
-            let inner_expression = if matches!(h, Token::Hash) {
-                    Node::Intrisic(
-                        Intrisic::from_parameters(name, arg_list)?
-                    )
+    fn nud(self, lexer: &mut Lexer) -> Node {
+        use Token::*;
+        match self {
+            Number(n) => Node::Number(n),
+            StringLiteral(s) => Node::StringLiteral(s),
+            Word(name) => Node::Identifier(name),
+            Op(op) => {
+                let (op, power) = match op {
+                    Operation::Minus => (UnaryOperation::Negation, 60),
+                    Operation::Exclamation => (UnaryOperation::LogicalNot, 60),
+                    Operation::Times => (UnaryOperation::Deref, 60),
+                    _ => unreachable!()
+                };
+                Node::UnaryExpr {
+                    op,
+                    value: Box::new(expression(lexer, power))
                 }
-                else {
-                    Node::Call {
-                        name: name.clone(),
-                        parameter_list: arg_list,
+            }
+            Keyword(keyword) => {
+                use token::Keyword::*;
+                match keyword {
+                    Func => {
+                        let Token::Word(name) = lexer.next() else { panic!("No function name") };
+                        lexer.expect(Token::Paren(Dir::Left));
+                        let parameter_list = parameter_list(lexer);
+                        let return_type = if lexer.peek() == &Token::Arrow {
+                            lexer.next();
+                            Type::from_node(expression(lexer, 1)).unwrap()
+                        } else {
+                            Type::Void
+                        };
+
+                        Node::FuncDef {
+                            name,
+                            parameter_list,
+                            body: Box::new(expression(lexer, 0)),
+                            return_type
+                        }
                     }
-                };
-
-            parse_following_or_return_inner(following, matching, inner_expression)
-        }
-        [Token::Keyword(Keyword::If), following @ ..] => {
-            let (open_body, _) = following.iter().enumerate().find(|(_, token)| matches!(token, Token::Brace(Dir::Left)))
-                .ok_or(ASTError::ExpectedToken(Token::Brace(Dir::Left)))?;
-
-            Ok(Node::If {
-                condition: Box::new(parse_expr(&following[..open_body])?),
-                body: Box::new(parse_expr(&following[open_body..])?)
-            })
-        }
-        [Token::Keyword(Keyword::Loop), following @ ..] => {
-            Ok(Node::Loop { body: Box::new(parse_expr(following)?) })
-        }
-        [Token::Keyword(Keyword::Break)] => Ok(Node::Break),
-        [Token::Keyword(Keyword::Return), return_expr @ ..] => {
-            Ok(Node::Return( Box::new(parse_expr(return_expr)?) ))
-        }
-        [Token::Paren(Dir::Left), following @ ..] => {
-            let matching = find_matching(following, Token::Paren(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
-
-            let inner_expression = parse_expr(&following[..matching])?;
-            parse_following_or_return_inner(following, matching, inner_expression)
-        }
-        [Token::Brace(Dir::Left), following @ ..] => {
-            let matching = find_matching(following, Token::Brace(Dir::Left), false).ok_or(ASTError::ExpectedToken(Token::Paren(Dir::Right)))?;
-
-            let block = parse_block(&following[..matching])?;
-            parse_following_or_return_inner(following, matching, block)
-        }
-        [Token::Op(op), _value] => Ok(Node::UnaryExpr { 
-            op: UnaryOperation::from_op(*op)?, 
-            value: Box::new(parse_expr(&tokens[1..])?)
-        }),
-        [_lhs, Token::Op(op), _rhs] => Ok(Node::Expr {
-            lhs: Box::new(parse_expr(&tokens[..1])?),
-            rhs: Box::new(parse_expr(&tokens[2..])?),
-            op: BinaryOperation::from_op(*op)?,
-        }),
-        tokens => {
-            let mut scope = 0;
-
-            // Get the operation with the highest precedence not in any parenthesises
-            let op = tokens
-                .iter()
-                .enumerate()
-                .flat_map(|(idx, token)| {
-                    match token {
-                        Token::Paren(Dir::Left) => scope += 1,
-                        Token::Paren(Dir::Right) => scope -= 1,
-                        Token::Op(op) if scope == 0 => return Some((idx, op)),
-                        _ => ()
-                    };
-
-                    None
-                }
-                )
-                .max_by(|a, b| a.1.precedence().cmp(&b.1.precedence()));
-
-            if let Some((idx, op)) = op {
-                // println!("Out of {tokens:?},\nthe biggest operation is {op:?}");
-                let lhs = if let token::Operation::Assignment = op {
-                    parse_lhs(&tokens[..idx])?
-                } else {
-                    parse_expr(&tokens[..idx])?
-                };
-
-                Ok(Node::Expr {
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(parse_expr(&tokens[(idx + 1)..])?),
-                    op: BinaryOperation::from_op(*op)?,
-                })
-            } else {
-                Err(ASTError::InvalidExpression)
-            }
-        }
-    }
-}
-
-/// Find the matching token to the one given
-///
-/// * `tokens`: The input tokens
-/// * `token`: The token to match
-/// * `included`: Wether the starting token is included in the input range
-fn find_matching(tokens: &[Token], token: Token, included: bool) -> Option<usize> {
-    let mut scope = i32::from(!included);
-    for (idx, tok) in tokens.iter().enumerate() {
-        scope += match (&token, tok) {
-            (Token::Paren(_), Token::Paren(dir)) | (Token::Brace(_), Token::Brace(dir)) => {
-                match dir {
-                    Dir::Left => 1,
-                    Dir::Right => -1,
+                    If => {
+                        let condition = expression(lexer, 1);
+                        Node::If {
+                            condition: Box::new(condition),
+                            body: Box::new(expression(lexer, 0))
+                        }
+                    }
+                    Loop => {
+                        Node::Loop {
+                            body: Box::new(expression(lexer, 0))
+                        }
+                    }
+                    Break => Node::Break,
+                    Return => Node::Return(Box::new(expression(lexer, 0)))
                 }
             }
-            _ => 0,
-        };
-
-        if scope == 0 {
-            return Some(idx);
-        }
-    }
-    None
-}
-
-/// Parses every comma separated expression in `inner_tokens`.
-///
-/// * `inner_tokens`: Given tokens
-fn parse_parameter_list(inner_tokens: &[Token]) -> Result<Vec<Node>> {
-    let mut scope = 0;
-
-    inner_tokens
-        .split(|t| {
-            match t {
-                Token::Paren(Dir::Left) => scope += 1,
-                Token::Paren(Dir::Right) => scope -= 1,
-                _ => ()
-            };
-
-            scope <= 0 && matches!(t, Token::Comma)
-        })
-        .filter(|t| !t.is_empty())
-        .map(parse_lhs)
-        .collect()
-}
-
-fn parse_block(tokens: &[Token]) -> Result<Node> {
-    let mut out = Vec::new();
-
-    // println!("aaa");
-    let mut start_idx = 0;
-    let mut it = tokens.iter().enumerate();
-    while let Some((idx, token)) = it.next() {
-        if let Token::Semicolon = token {
-            let line = &tokens[start_idx..idx];
-            if !line.is_empty() {
-                out.push(Node::Statement(Box::new(parse_expr(line)?)));
+            Paren(Dir::Left) => { // parenthesis for grouping operations
+                let ex = expression(lexer, 0);
+                lexer.expect(Paren(Dir::Right));
+                ex
             }
-            start_idx = idx + 1;
-        }
-        else if let Token::Brace(Dir::Left) = token { // skip underlyinh scopes
-            if let Some(end_idx) = find_matching(&tokens[idx..], Token::Brace(Dir::Left), true) {
-                // NOTE: end_idx is relative to tokens[idx..]
-                it.by_ref().nth(end_idx - 1);
-            } else {
-                return Err(ASTError::ExpectedToken(Token::Brace(Dir::Right)));
+            Brace(Dir::Left) => {
+                Node::Block(parse_block(lexer))
             }
+            Semicolon => Node::Statement(Box::new(Node::Number(0))),
+            _ => unreachable!("{self:#?}")
         }
     }
 
-    // Get last expression
-    if start_idx < tokens.len() {
-        let line = &tokens[start_idx..];
-        if !line.is_empty() {
-            out.push(parse_expr(line)?);
+    fn led(self, lexer: &mut Lexer, left: Node) -> Node {
+        use Token::*;
+        match self {
+            Op(op) => {
+                use Operation::*;
+                let (op, power) = match op {
+                    Assignment      => (BinaryOperation::Assignment, 9),
+                    LogicalAnd      => (BinaryOperation::LogicalAnd, 21),
+                    LogicalOr       => (BinaryOperation::LogicalOr, 21),
+                    LogicalXor      => (BinaryOperation::LogicalXor, 21),
+                    Equals          => (BinaryOperation::Equals, 31),
+                    NotEquals       => (BinaryOperation::NotEquals, 31),
+                    Greater         => (BinaryOperation::Greater, 31),
+                    GreaterOrEquals => (BinaryOperation::GreaterOrEquals, 31),
+                    Lesser          => (BinaryOperation::Lesser, 31),
+                    LesserOrEquals  => (BinaryOperation::LesserOrEquals, 31),
+                    Plus            => (BinaryOperation::Add, 41),
+                    Minus           => (BinaryOperation::Sub, 41),
+                    Times           => (BinaryOperation::Mul, 51),
+                    Div             => (BinaryOperation::Div, 51),
+                    Modulus         => (BinaryOperation::Modulus, 51),
+                    Exclamation     => unreachable!()
+                };
+
+                Node::Expr {
+                    op,
+                    lhs: Box::new(left),
+                    rhs: Box::new(expression(lexer, power))
+                }
+            }
+            Word(name) => { // got (type) variable
+                Node::Definition {
+                    typename: Type::from_node(left).unwrap(),
+                    name
+                }
+            }
+            Paren(Dir::Left) => { // parenthesis operator = function call
+                let Node::Identifier(name) = left else { unreachable!("{left:#?}") };
+
+                Node::Call {
+                    name,
+                    parameter_list: parameter_list(lexer)
+                }
+            }
+            Hash => {
+                let Node::Identifier(name) = left else { unreachable!("{left:#?}") };
+
+                lexer.expect(Token::Paren(Dir::Left));
+                let list = parameter_list(lexer);
+                let intrisic = match name.as_str() {
+                    "asm" => Intrisic::Asm(Box::new(list.into_iter().next().unwrap())),
+                    "print" => Intrisic::Print(list),
+                    _ => unreachable!("Wrong intrisic {name}")
+                };
+                Node::Intrisic(intrisic)
+            }
+            _ => unreachable!("{self:#?}")
         }
     }
-
-    Ok(Node::Block(out))
 }
 
-pub fn parse_func_def(mut tokens: &[Token]) -> Result<Option<(Node, &[Token])>> {
-    if let (Token::Keyword(Keyword::Func), Token::Word(name)) = (&tokens[0], &tokens[1]) {
-        tokens = &tokens[2..];
-
-        // println!("{tokens:#?}");
-
-        let Token::Paren(Dir::Left) = tokens[0] else { panic!("No parameter list after function definition") };
-
-        let matching =
-            find_matching(tokens, Token::Paren(Dir::Left), true).expect("End to parameter list");
-
-        let parameter_list = parse_parameter_list(&tokens[1..matching])?;
-
-        tokens = &tokens[(matching + 1)..];
-
-        let (open_brace, _) = tokens.iter().find_position(|x| matches!(x, Token::Brace(Dir::Left)))
-            .ok_or(ASTError::ExpectedToken(Token::Brace(Dir::Left)))?;
-
-        let return_type = if let Token::Arrow = &tokens[0] {
-            Type::from_tokens(&tokens[1..open_brace])?
-        } else {
-            Type::Void
-        };
-
-        tokens = &tokens[(open_brace + 1)..];
-
-        let body = if let Some(end_idx) = find_matching(tokens, Token::Brace(Dir::Left), false) {
-            let body = parse_block(&tokens[..end_idx])?;
-            tokens = &tokens[(end_idx + 1)..];
-            body
-        } else {
-            // panic!("No brace after function definition")
-            return Err(ASTError::ExpectedToken(Token::Brace(Dir::Right)));
-        };
-
-        Ok(Some((
-            Node::FuncDef {
-                name: name.clone(),
-                parameter_list,
-                return_type,
-                body: Box::new(body),
-            },
-            tokens,
-        )))
-    } else {
-        Ok(None)
+fn parameter_list(lexer: &mut Lexer) -> Vec<Node> {
+    let mut list = Vec::new();
+    if lexer.peek() != &Token::Paren(Dir::Right) {
+        loop {
+            list.push(expression(lexer, 0));
+            if lexer.peek() != &Token::Comma {
+                break;
+            }
+            lexer.expect(Token::Comma);
+        }
     }
+    lexer.expect(Token::Paren(Dir::Right));
+    list
 }
 
-pub fn parse_ast(mut tokens: &[Token]) -> Result<Node> {
+pub fn parse_block(lexer: &mut Lexer) -> Vec<Node> {
+    let mut block = Vec::new();
+    while lexer.peek() != &Token::Brace(Dir::Right) {
+        let expr = expression(lexer, 0);
+        let next = lexer.peek();
+        if next == &Token::Semicolon {
+            block.push(Node::Statement(Box::new(expr)));
+            lexer.next();
+        }
+        else {
+            block.push(expr);
+        }
+    }
+    lexer.expect(Token::Brace(Dir::Right));
+
+    block
+}
+
+fn expression(lexer: &mut Lexer, rbp: u32) -> Node {
+    let mut t = lexer.next();
+
+    let mut left = t.nud(lexer);
+    while lexer.peek().left_binding_power() > rbp {
+        t = lexer.next();
+        left = t.led(lexer, left);
+    }
+
+    left
+}
+
+pub fn parse_ast(lexer: &mut Lexer) -> Node {
     let mut root = Vec::new();
-    while !matches!(tokens[0], Token::Eof) && !tokens.is_empty() {
-        if let Some((func, out_tokens)) = parse_func_def(tokens)? {
-            root.push(func);
-            tokens = out_tokens;
-        } else {
-            eprintln!("{tokens:#?}");
-            panic!("Couldn't find a valid statement");
-        }
+    while lexer.peek() != &Token::Eof {
+        root.push(expression(lexer, 0));
     }
-
-    Ok(Node::Block(root))
+    Node::Block(root)
 }

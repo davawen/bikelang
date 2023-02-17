@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::token::{Token, self};
+use crate::{token::{Token, self}, ast::{Node, UnaryOperation}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -50,13 +50,13 @@ impl Type {
         }
     }
 
-    pub fn from_tokens(tokens: &[Token]) -> Result<Self> {
-        match tokens {
-            [Token::Word(typename)] => Self::from_str(typename),
-            [Token::Op(token::Operation::Mul), inner @ ..] => Ok(
-                Self::Ptr(Box::new(Self::from_tokens(inner)?))
+    pub fn from_node(node: Node) -> Result<Self> {
+        match node {
+            Node::Identifier(typename) => Self::from_str(&typename),
+            Node::UnaryExpr { op: UnaryOperation::Deref, value } => Ok(
+                Self::Ptr(Box::new(Self::from_node(*value)?))
             ),
-            _ => Err(TypeError::Unknown(format!("{tokens:?}")))
+            _ => Err(TypeError::Unknown(format!("{node:?}")))
         }
     }
 

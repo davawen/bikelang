@@ -1,12 +1,12 @@
 use std::fs;
 
 use crate::{
-    ast::parse_ast,
-    token::tokenize, utility::Inspect,
+    token::Lexer, utility::Inspect, ast::parse_ast,
 };
 
 mod utility;
 mod ast;
+// mod old_ast;
 mod analysis;
 mod ir;
 mod token;
@@ -20,11 +20,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let source = String::from_utf8(fs::read(&args[1])?)?;
 
-    let tokens = tokenize(&source);
-    println!("{tokens:#?}");
+    let mut lexer = Lexer::new(&source);
 
-    let ast = parse_ast(&tokens).log_err()?;
-    // println!("{ast:#?}");
+    let ast = parse_ast(&mut lexer);
+    println!("{ast:#?}");
 
     let mut app = analysis::App::new();
 
