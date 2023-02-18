@@ -62,15 +62,20 @@ impl Function {
     fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, func: &analysis::Function, scope: &[Scope], node: ast::Node) -> Value {
         match node {
             ast::Node::Expr { op: BinaryOperation::Assignment, ty: _, lhs, rhs } => {
-                let (ast::Node::Identifier(var, _) | ast::Node::Definition { name: var, .. }) = *lhs
-                else { 
-                    todo!("Can only assign values to variables for now")
+                let address = match *lhs {
+                    ast::Node::Identifier(var, _) | ast::Node::Definition { name: var, .. } => {
+                        let var = self.named_variables[&var];
+                        var.into()
+                    }
+                    ast::Node::UnaryExpr { op: UnaryOperation::Deref, ty, value: var, .. } => {
+                        let var = self.fold_node(ir, app, func, scope, *var);
+                        Address::Ptr(var, ty.size())
+                    }
+                    _ => unreachable!("Cannot assign to {lhs:?}"),
                 };
 
-                let var = self.named_variables[&var];
-
                 let rhs = self.fold_node(ir, app, func, scope, *rhs);
-                self.instructions.push(Instruction::VariableStore(var, rhs));
+                self.instructions.push(Instruction::VariableStore(address, rhs));
 
                 Value::NoValue
             }
@@ -85,27 +90,24 @@ impl Function {
                     Negation => Arithmetic::Negate(value)
                 };
 
-                self.instructions.push(Instruction::StoreOperation(temporary, op));
+                self.instructions.push(Instruction::StoreOperation(temporary.into(), op));
                 Value::VariableLoad(temporary)
             }
-            ast::Node::Expr { op, ty: _, lhs, rhs } => {
+            ast::Node::Expr { op, ty, lhs, rhs } => {
                 let lhs = self.fold_node(ir, app, func, scope, *lhs);
                 let rhs = self.fold_node(ir, app, func, scope, *rhs);
 
-                let temporary;
+                let temporary = self.add_temporary(ty.size());
 
                 let ins = match op {
                     op if op.is_arithmetic() => {
-                        temporary = self.add_temporary(4);
-                        Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs))
+                        Instruction::StoreOperation(temporary.into(), Arithmetic::from_op(op, lhs, rhs))
                     }
                     op if op.is_logic() => {
-                        temporary = self.add_temporary(1);
-                        Instruction::StoreOperation(temporary, Arithmetic::from_op(op, lhs, rhs))
+                        Instruction::StoreOperation(temporary.into(), Arithmetic::from_op(op, lhs, rhs))
                     }
                     op if op.is_comparison() => {
-                        temporary = self.add_temporary(1);
-                        Instruction::StoreComparison(temporary, Comparison::from_op(op, lhs, rhs))
+                        Instruction::StoreComparison(temporary.into(), Comparison::from_op(op, lhs, rhs))
                     }
                     _ => unreachable!()
                 };
@@ -127,7 +129,7 @@ impl Function {
                 if return_size > 0 {
                     let temporary = self.add_temporary(return_size);
                     self.instructions.push(
-                        Instruction::VariableStore(temporary, Value::LastCall { size: return_size })
+                        Instruction::VariableStore(temporary.into(), Value::LastCall { size: return_size })
                     );
 
                     Value::VariableLoad(temporary)
@@ -205,7 +207,7 @@ impl Function {
             }
             ast::Node::Return(inner) => {
                 let inner = self.fold_node(ir, app, func, scope, *inner);
-                self.instructions.push(Instruction::VariableStore(self.return_variable.unwrap(), inner));
+                self.instructions.push(Instruction::VariableStore(self.return_variable.unwrap().into(), inner));
                 self.instructions.push(Instruction::Ret);
 
                 Value::NoValue

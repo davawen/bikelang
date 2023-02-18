@@ -40,15 +40,28 @@ impl Intrisic {
     }
 }
 
+impl Address {
+    fn used_variable(&self) -> Option<VariableKey> {
+        match self {
+            Address::Variable(key) => Some(*key),
+            Address::Ptr(value, _) => value.used_variable()
+        }
+    }
+}
+
 impl Instruction {
     fn used_variables(&self) -> Vec<VariableKey> {
         match self {
-            Instruction::VariableStore(key, v) => [ Some(*key), v.used_variable() ].into_iter().flatten().collect(),
-            Instruction::StoreOperation(key, v) => {
-                [ *key ].into_iter().chain(v.as_values().into_iter().flat_map(|x| x.used_variable())).collect()
+            Instruction::VariableStore(var, v) => [ var.used_variable(), v.used_variable() ].into_iter().flatten().collect(),
+            Instruction::StoreOperation(var, v) => {
+                [ var.used_variable() ].into_iter()
+                    .chain(v.as_values().into_iter().map(|x| x.used_variable()))
+                    .flatten().collect()
             }
-            Instruction::StoreComparison(key, cmp) => {
-                [ *key ].into_iter().chain(cmp.as_values().into_iter().flat_map(|x| x.used_variable())).collect()
+            Instruction::StoreComparison(var, cmp) => {
+                [ var.used_variable() ].into_iter()
+                    .chain(cmp.as_values().into_iter().map(|x| x.used_variable()))
+                    .flatten().collect()
             }
             Instruction::Jump(_, cmp) => {
                 cmp.as_values().into_iter().flat_map(|x| x.used_variable()).collect()
@@ -90,11 +103,11 @@ impl Function {
 
         let mut it = self.instructions.iter_mut().enumerate().peekable();
         while let Some((_, ins)) = it.next() {
-            if let Instruction::StoreOperation(temp, _)
-            | Instruction::StoreComparison(temp, _)
-            | Instruction::VariableStore(temp, Value::LastCall { .. }) = ins
+            if let Instruction::StoreOperation(Address::Variable(temp), _)
+            | Instruction::StoreComparison(Address::Variable(temp), _)
+            | Instruction::VariableStore(Address::Variable(temp), Value::LastCall { .. }) = ins
             {
-                if let Some((idx, Instruction::VariableStore(var, Value::VariableLoad(load)))) = it.peek() {
+                if let Some((idx, Instruction::VariableStore(Address::Variable(var), Value::VariableLoad(load)))) = it.peek() {
                     if load == temp {
                         *temp = *var;
                         mask.push(*idx);

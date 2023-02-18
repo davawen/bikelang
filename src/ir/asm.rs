@@ -78,6 +78,20 @@ impl Register {
     }
 }
 
+
+// Addresses use r8 as an intermediary register
+impl Address {
+    fn as_operand(&self, func: &Function) -> (String, String) {
+        match self {
+            Address::Variable(key) => (String::new(), variable_operand(func, *key)),
+            Address::Ptr(v, pointed_size) => {
+                let (r8, move_to) = v.move_to(Register::R8, func);
+                (move_to + "\n", format!("{} [{r8}]", word_size(*pointed_size)))
+            }
+        }
+    }
+}
+
 impl Value {
     fn as_operand(&self, func: &Function) -> String {
         match self {
@@ -102,12 +116,12 @@ impl Value {
         }
     }
 
-    fn direct_move_or_pass(&self, destination: &str, func: &Function) -> String {
+    fn direct_move_or_pass(&self, destination: String, func: &Function) -> String {
         if self.is_memory_access() {
             let (reg, move_to) = self.move_to(Register::Rax, func);
-            format!("{move_to}\nmov {}, {reg}\n", destination)
+            format!("{move_to}\nmov {destination}, {reg}\n")
         } else {
-            format!("mov {}, {}\n", destination, self.as_operand(func))
+            format!("mov {destination}, {}\n", self.as_operand(func))
         }
     }
 
@@ -269,17 +283,20 @@ syscall
 impl Instruction {
     fn generate_asm(&self, ir: &Ir, func: &Function) -> String {
         match self {
-            Instruction::VariableStore(idx, value) => {
-                value.direct_move_or_pass(&variable_operand(func, *idx), func)
+            Instruction::VariableStore(var, value) => {
+                let (load_var, operand) = var.as_operand(func);
+                format!("{load_var}{}", value.direct_move_or_pass(operand, func))
             }
-            Instruction::StoreOperation(idx, op) => {
+            Instruction::StoreOperation(var, op) => {
                 let (reg, code) = op.generate_asm(func);
-                format!("{code}mov {}, {reg}\n", variable_operand(func, *idx))
+                let (load_var, operand) = var.as_operand(func);
+                format!("{code}{load_var}mov {operand}, {reg}\n")
             }
-            Instruction::StoreComparison(idx, comp) => {
+            Instruction::StoreComparison(var, comp) => {
                 let comparison = comp.generate_asm(func);
                 let store = comp.as_store();
-                format!("{comparison}\n{store} {}\n", variable_operand(func, *idx))
+                let (load_var, operand) = var.as_operand(func);
+                format!("{comparison}\n{load_var}{store} {operand}\n", )
             }
             Instruction::Label(label_idx) => {
                 format!(".label{label_idx}:")
@@ -297,7 +314,7 @@ impl Instruction {
                     "{}{}\ncall {}\nadd rsp, {}",
                     if return_type.size() > 0 { format!("sub rsp, {}\n", return_type.size()) } else { "".to_owned() },
                     parameters.iter().rev().map(|p| {
-                        format!("sub rsp, {}\n{}", p.size(func), p.direct_move_or_pass("[rsp]", func))
+                        format!("sub rsp, {}\n{}", p.size(func), p.direct_move_or_pass("[rsp]".to_owned(), func))
                     }).join("\n"),
                     ir.functions[*func_idx].name,
                     parameters.iter().map(|p| p.size(func)).sum::<u32>()

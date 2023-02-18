@@ -7,7 +7,7 @@ lea rax, [rbp-4]
 mov QWORD [rbp-12], rax
 	");
 
-	//*ptr = 15;
+	*ptr = 15;
 
 	print#("-n: ", -*ptr);
 }

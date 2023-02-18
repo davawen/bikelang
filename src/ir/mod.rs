@@ -33,9 +33,9 @@ struct Function {
 
 #[derive(Debug)]
 enum Instruction {
-    VariableStore(VariableKey, Value),
-    StoreOperation(VariableKey, Arithmetic),
-    StoreComparison(VariableKey, Comparison),
+    VariableStore(Address, Value),
+    StoreOperation(Address, Arithmetic),
+    StoreComparison(Address, Comparison),
     Label(LabelIndex),
     Jump(LabelIndex, Comparison),
     Intrisic(Intrisic),
@@ -45,6 +45,18 @@ enum Instruction {
         return_type: typed::Type
     },
     Ret
+}
+
+#[derive(Debug)]
+enum Address {
+    Variable(VariableKey),
+    Ptr(Value, u32)
+}
+
+impl From<VariableKey> for Address {
+    fn from(value: VariableKey) -> Self {
+        Address::Variable(value)
+    }
 }
 
 #[derive(Debug)]
