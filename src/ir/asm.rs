@@ -197,6 +197,11 @@ impl Arithmetic {
                     word_size(*size)
                 ))
             }
+            AddressOf(v) => {
+                let Value::VariableLoad(v) = v else { unreachable!("Trying to take address of r-value") };
+                let rax = Register::Rax.as_str(8);
+                (rax, format!("lea rax, {}\n", variable_operand(func, *v)))
+            }
         }
     }
 }
@@ -366,7 +371,7 @@ __builtin_print_number{size}:
     test {rax}, {rax}
     jns .positive
 
-    neg rax
+    neg {rax}
 
     .positive:
     mov rcx, 0

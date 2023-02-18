@@ -85,7 +85,8 @@ enum Arithmetic {
     Xor(Value, Value),
     Not(Value),
     Negate(Value),
-    Deref(Value, u32)
+    Deref(Value, u32),
+    AddressOf(Value)
 }
 
 #[derive(Debug)]

@@ -1,3 +1,5 @@
+#![feature(box_syntax, box_patterns)]
+
 use std::fs;
 
 use crate::{

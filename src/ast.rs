@@ -56,6 +56,7 @@ pub enum Intrisic {
 pub enum UnaryOperation {
     Negation,
     Deref,
+    AddressOf,
     LogicalNot
 }
 
@@ -109,7 +110,7 @@ impl Token {
                 Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => 30,
                 Plus | Minus => 40,
                 Times | Div | Modulus => 50,
-                Exclamation => unreachable!()
+                Exclamation | AddressOf => unreachable!()
             }
             Paren(Dir::Left) => 70, // operator ()
             Hash => 70,
@@ -129,14 +130,15 @@ impl Token {
             Op(op) => {
                 let (op, power) = match op {
                     Operation::Minus => (UnaryOperation::Negation, 60),
-                    Operation::Exclamation => (UnaryOperation::LogicalNot, 60),
                     Operation::Times => (UnaryOperation::Deref, 60),
+                    Operation::AddressOf => (UnaryOperation::AddressOf, 60),
+                    Operation::Exclamation => (UnaryOperation::LogicalNot, 60),
                     _ => unreachable!()
                 };
                 Node::UnaryExpr {
                     op,
                     ty: Type::Void,
-                    value: Box::new(expression(lexer, power))
+                    value: box expression(lexer, power)
                 }
             }
             Keyword(keyword) => {
@@ -156,24 +158,24 @@ impl Token {
                         Node::FuncDef {
                             name,
                             parameter_list,
-                            body: Box::new(expression(lexer, 0)),
+                            body: box expression(lexer, 0),
                             return_type
                         }
                     }
                     If => {
                         let condition = expression(lexer, 1);
                         Node::If {
-                            condition: Box::new(condition),
-                            body: Box::new(expression(lexer, 0))
+                            condition: box condition,
+                            body: box expression(lexer, 0)
                         }
                     }
                     Loop => {
                         Node::Loop {
-                            body: Box::new(expression(lexer, 0))
+                            body: box expression(lexer, 0)
                         }
                     }
                     Break => Node::Break,
-                    Return => Node::Return(Box::new(expression(lexer, 0)))
+                    Return => Node::Return(box expression(lexer, 0))
                 }
             }
             Paren(Dir::Left) => { // parenthesis for grouping operations
@@ -210,14 +212,14 @@ impl Token {
                     Times           => (BinaryOperation::Mul, 51),
                     Div             => (BinaryOperation::Div, 51),
                     Modulus         => (BinaryOperation::Modulus, 51),
-                    Exclamation     => unreachable!()
+                    Exclamation | AddressOf => unreachable!()
                 };
 
                 Node::Expr {
                     op,
                     ty: Type::Void,
-                    lhs: Box::new(left),
-                    rhs: Box::new(expression(lexer, power))
+                    lhs: box left,
+                    rhs: box expression(lexer, power)
                 }
             }
             Word(name) => { // got (type) variable
@@ -241,7 +243,7 @@ impl Token {
                 lexer.expect(Token::Paren(Dir::Left));
                 let list = parameter_list(lexer);
                 let intrisic = match name.as_str() {
-                    "asm" => Intrisic::Asm(Box::new(list.into_iter().next().unwrap())),
+                    "asm" => Intrisic::Asm(box list.into_iter().next().unwrap()),
                     "print" => Intrisic::Print(list),
                     _ => unreachable!("Wrong intrisic {name}")
                 };
@@ -273,7 +275,7 @@ pub fn parse_block(lexer: &mut Lexer) -> Vec<Node> {
         let expr = expression(lexer, 0);
         let next = lexer.peek();
         if next == &Token::Semicolon {
-            block.push(Node::Statement(Box::new(expr)));
+            block.push(Node::Statement(box expr));
             lexer.next();
         }
         else {

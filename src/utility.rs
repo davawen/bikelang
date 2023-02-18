@@ -39,10 +39,11 @@ pub trait Transmit<T> where Self: Sized {
     fn transmit(self) -> T;
 }
 
-impl<T, E1, E2> Transmit<Result<T, E2>> for Result<T, E1>
-    where E1: Into<E2>
+impl<T1, T2, E1, E2> Transmit<Result<T2, E2>> for Result<T1, E1> where
+    E1: Into<E2>,
+    T1: Into<T2>
 {
-    fn transmit(self) -> Result<T, E2> {
-        self.map_err(|e| e.into())
+    fn transmit(self) -> Result<T2, E2> {
+        self.map_err(|e| e.into()).map(|x| x.into())
     }
 }

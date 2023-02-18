@@ -8,12 +8,24 @@ pub enum Type {
     Integer32,
     Float32,
     Boolean,
-    String,
     Ptr(Box<Type>),
     Void,
     // For later :)
     // Struct(TypeIndex)
 }
+
+#[derive(Debug, Clone)]
+pub struct TypeDescriptor {
+    pub ty: Type,
+    pub has_address: bool
+}
+
+impl PartialEq for TypeDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        self.ty == other.ty
+    }
+}
+impl Eq for TypeDescriptor {}
 
 #[derive(Debug, Clone, Error)]
 pub enum TypeError {
@@ -21,6 +33,8 @@ pub enum TypeError {
     Unknown(String),
     #[error("Expected type {1:?}, got {2:?}: {0}")]
     Mismatched(&'static str, SuperType, Type),
+    #[error("Invalid operation on {1:?}: {0}")]
+    InvalidOperation(&'static str, Type)
 }
 
 pub type Result<T> = std::result::Result<T, TypeError>;
@@ -34,7 +48,6 @@ impl Type {
             Integer32 => 4,
             Float32 => 4,
             Boolean => 1,
-            String => 8,
             Ptr(_) => 8,
             Void => 0
         }
@@ -42,22 +55,23 @@ impl Type {
 
     pub fn from_str(name: &str) -> Result<Self> {
         use Type::*;
-        match name {
-            "u8" => Ok(UInt8),
-            "i32" => Ok(Integer32),
-            "f32" => Ok(Float32),
-            "bool" => Ok(Boolean),
-            "str" => Ok(String),
-            "void" => Ok(Void),
-            _ => Err(TypeError::Unknown(name.to_owned()))
-        }
+        let ty = match name {
+            "u8" => UInt8,
+            "i32" => Integer32,
+            "f32" => Float32,
+            "bool" => Boolean,
+            "str" => Self::string(),
+            "void" => Void,
+            _ => return Err(TypeError::Unknown(name.to_owned()))
+        };
+        Ok(ty)
     }
 
     pub fn from_node(node: Node) -> Result<Self> {
         match node {
             Node::Identifier( typename, _) => Self::from_str(&typename),
             Node::UnaryExpr { op: UnaryOperation::Deref, value, .. } => Ok(
-                Self::Ptr(Box::new(Self::from_node(*value)?))
+                Type::Ptr(box Self::from_node(*value)?)
             ),
             _ => Err(TypeError::Unknown(format!("{node:?}")))
         }
@@ -77,6 +91,49 @@ impl Type {
             Ok(())
         } else {
             Err(TypeError::Mismatched(msg, expected, self.clone()))
+        }
+    }
+
+    pub fn ptr(ty: Type) -> Self {
+        Type::Ptr(box ty)
+    }
+    pub fn string() -> Self {
+        Self::ptr(Type::UInt8)
+    }
+
+    pub fn addressable(self) -> TypeDescriptor {
+        TypeDescriptor::from(self).addressable()
+    }
+}
+
+impl TypeDescriptor {
+    pub fn new(ty: Type, has_address: bool) -> Self {
+        Self { ty, has_address }
+    }
+
+    pub fn addressable(mut self) -> Self {
+        self.has_address = true;
+        self
+    }
+
+    pub fn expect(self, expected: SuperType, msg: &'static str) -> Result<Self> {
+        if expected.verify(&self.ty) {
+            Ok(self)
+        } else {
+            Err(TypeError::Mismatched(msg, expected, self.ty))
+        }
+    }
+
+    pub fn expect_ref(&self, expected: SuperType, msg: &'static str) -> Result<()> {
+        self.ty.expect_ref(expected, msg)
+    }
+}
+
+impl From<Type> for TypeDescriptor {
+    fn from(ty: Type) -> Self {
+        Self {
+            ty,
+            has_address: false
         }
     }
 }
@@ -102,10 +159,10 @@ impl From<Type> for SuperType {
 #[macro_export]
 macro_rules! super_type_or {
     ($a:expr, $b:expr) => {
-        SuperType::Or(Box::new($a.into()), Box::new($b.into()))
+        SuperType::Or(box $a.into(), box $b.into())
     };
     ($a:expr, $b:expr $(, $more:expr)+) => {
-        SuperType::Or(Box::new($a.into()), Box::new(super_type_or!($b $(, $more)+)))
+        SuperType::Or(box $a.into(), box super_type_or!($b $(, $more)+))
     };
 }
 

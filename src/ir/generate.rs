@@ -87,6 +87,7 @@ impl Function {
                 let op = match op {
                     LogicalNot => Arithmetic::Not(value),
                     Deref => Arithmetic::Deref(value, ty.size()),
+                    AddressOf => Arithmetic::AddressOf(value),
                     Negation => Arithmetic::Negate(value)
                 };
 
@@ -148,7 +149,7 @@ impl Function {
                         for node in values {
                             // Desugar print intrisic
                             let print = match node.get_type().clone() {
-                                Type::String => Intrisic::PrintString(self.fold_node(ir, app, func, scope, node)),
+                                Type::Ptr(box Type::UInt8) => Intrisic::PrintString(self.fold_node(ir, app, func, scope, node)),
                                 ty if SuperType::Integer.verify(&ty) => Intrisic::PrintNumber(self.fold_node(ir, app, func, scope, node), ty.size()),
                                 _ => unreachable!()
                             };
