@@ -150,7 +150,7 @@ impl Function {
                             // Desugar print intrisic
                             let print = match node.get_type().clone() {
                                 Type::Ptr(box Type::UInt8) => Intrisic::PrintString(self.fold_node(ir, app, func, scope, node)),
-                                ty if SuperType::Integer.verify(&ty) => Intrisic::PrintNumber(self.fold_node(ir, app, func, scope, node), ty.size()),
+                                ty if SuperType::Integer.verify(&ty) => Intrisic::PrintNumber(self.fold_node(ir, app, func, scope, node), ty),
                                 _ => unreachable!()
                             };
 

@@ -141,7 +141,7 @@ impl Node {
     pub fn set_type(&mut self, app: &App, definition: &Function, expect: Option<&Type>) -> Result<TypeDescriptor> {
         match self {
             Node::Number(value, ty) => {
-                *ty = Type::Integer32;
+                *ty = Type::Int32;
                 if let Some(expect) = expect {
                     if SuperType::Integer.verify(expect) || (SuperType::Ptr.verify(expect) && *value == 0) {
                         *ty = expect.clone();

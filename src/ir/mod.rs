@@ -92,7 +92,7 @@ enum Arithmetic {
 #[derive(Debug)]
 enum Intrisic {
     Asm(Value),
-    PrintNumber(Value, u32),
+    PrintNumber(Value, typed::Type),
     PrintString(Value)
 }
 

@@ -5,7 +5,11 @@ use crate::ast::{Node, UnaryOperation};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     UInt8,
-    Integer32,
+    Int8,
+    UInt32,
+    Int32,
+    UInt64,
+    Int64,
     Float32,
     Boolean,
     Ptr(Box<Type>),
@@ -44,8 +48,9 @@ impl Type {
     pub fn size(&self) -> u32 {
         use Type::*;
         match self {
-            UInt8 => 1,
-            Integer32 => 4,
+            UInt8 | Int8 => 1,
+            UInt32 | Int32 => 4,
+            UInt64 | Int64 => 8,
             Float32 => 4,
             Boolean => 1,
             Ptr(_) => 8,
@@ -57,7 +62,11 @@ impl Type {
         use Type::*;
         let ty = match name {
             "u8" => UInt8,
-            "i32" => Integer32,
+            "i8" => Int8,
+            "u32" => UInt32,
+            "i32" => Int32,
+            "u64" => UInt64,
+            "i64" => Int64,
             "f32" => Float32,
             "bool" => Boolean,
             "str" => Self::string(),
@@ -172,8 +181,8 @@ impl SuperType {
         match self {
             As(t)      => t == ty,
             Or(t1, t2) => t1.verify(ty) || t2.verify(ty),
-            Signed     => matches!(ty, Type::Integer32),
-            Unsigned   => matches!(ty, Type::UInt8),
+            Signed     => matches!(ty, Type::Int8 | Type::Int32 | Type::Int64),
+            Unsigned   => matches!(ty, Type::UInt8 | Type::UInt32 | Type::UInt64),
             Integer    => Signed.verify(ty) || Unsigned.verify(ty),
             Float      => matches!(ty, Type::Float32),
             Number     => Integer.verify(ty) || Float.verify(ty),

@@ -99,7 +99,8 @@ impl Value {
             &Value::VariableLoad(idx) => variable_operand(func, idx),
             &Value::LastCall { size } => format!("{} [rsp]", word_size(size)),
             &Value::Boolean(x) => if x { "BYTE 1".to_owned() } else { "BYTE 0".to_owned() },
-            Value::NoValue | Value::Literal(_) => unreachable!("blegh: {self:#?}")
+            Value::Literal(idx) => format!("user_str{idx}"),
+            Value::NoValue => unreachable!("blegh: {self:#?}")
         }
     }
 
@@ -110,9 +111,9 @@ impl Value {
 
     fn is_memory_access(&self) -> bool {
         match self {
-            Value::Number(..) | Value::Boolean(_) => false,
+            Value::Number(..) | Value::Boolean(_) | Value::Literal(_) => false,
             Value::VariableLoad(_) | Value::LastCall { .. } => true,
-            Value::NoValue | Value::Literal(_) => unreachable!("{self:#?}")
+            Value::NoValue => unreachable!("{self:#?}")
         }
     }
 
@@ -263,9 +264,21 @@ impl Intrisic {
             Asm(Value::Literal(inner)) => {
                 ir.literals[*inner].clone()
             }
-            PrintNumber(v, size) => {
+            PrintNumber(v, ty) => {
                 let rax = Register::Rax.as_str(v.size(func));
-                format!("mov {rax}, {}\ncall __builtin_print_number{size}", v.as_operand(func))
+                let mut out = format!("mov {rax}, {}\n", v.as_operand(func));
+
+                if typed::SuperType::Signed.verify(ty) {
+                    let size = ty.size();
+                    if size == 1 { out += "cbw\n" }
+                    if size <= 2 { out += "cwde\n" }
+                    if size <= 4 { out += "cdqe\n" }
+
+                    out += "call __builtin_print_number_signed\n";
+                } else {
+                    out += "call __builtin_print_number_unsigned\n";
+                }
+                out
             },
             PrintString(Value::Literal(idx)) => {
                 let literal = &ir.literals[*idx];
@@ -360,29 +373,41 @@ impl Ir {
     pub fn builtins(&self) -> String {
         let mut out = String::new();
 
-        for size in [1, 2, 4, 8] {
-            let rax = Register::Rax.as_str(size);
-            let rdx = Register::Rdx.as_str(size);
-            let r8 = Register::R8.as_str(size);
-            let r9 = Register::R9.as_str(size);
-            out.push_str(&format!("
-__builtin_print_number{size}:
-    mov {r9}, {rax} ; save full number for later
-    test {rax}, {rax}
+        for signed in [false, true] {
+            let name = if signed { "signed" } else { "unsigned" };
+
+            let negate = if signed { "
+    mov r9, rax ; save full number for later
+    test rax, rax
     jns .positive
 
-    neg {rax}
+    neg rax
 
     .positive:
+"           } else { "" };
+
+            let add_minus = if signed { "
+    test r9, r9
+    jns .positive1
+    sub rsp, 1
+    mov BYTE [rsp], '-' ; show negative numbers
+    inc rcx
+
+    .positive1:
+"           } else { "" };
+
+            out.push_str(&format!("
+__builtin_print_number_{name}:
+    {negate}
     mov rcx, 0
     .loop:
-        xor {rdx}, {rdx} ; nullify rdx
+        xor rdx, rdx ; nullify rdx
 
-        mov {r8}, 10
-        idiv {r8} ; divide assembled register {rdx}:{rax} by {r8}
-        ; quotient goes in {rax}, remainder goes in {rdx}
+        mov r8, 10
+        div r8 ; divide assembled register rdx:rax by r8
+        ; quotient goes in rax, remainder goes in rdx
 
-        add {rdx}, 0x30 ; offset remainder to ASCII '0'
+        add rdx, 0x30 ; offset remainder to ASCII '0'
 
         ; push printable remainder to stack
         sub rsp, 1
@@ -390,16 +415,10 @@ __builtin_print_number{size}:
 
         ; continue until remaining number is 0
         inc rcx
-        cmp rax, 0
+        test rax, rax
         jnz .loop
     
-    test {r9}, {r9}
-    jns .positive1
-    sub rsp, 1
-    mov BYTE [rsp], '-' ; show negative numbers
-    inc rcx
-
-    .positive1:
+    {add_minus}
     push rcx ; save rcx for cleanup
 
     ; the stack grows downwards, so the characters pushed in reverse order are now in the good order
@@ -414,6 +433,7 @@ __builtin_print_number{size}:
     ret
 "));
         }
+        
 
         out
     }

@@ -1,8 +1,26 @@
+func putc(u8 char) -> u8 {
+	u8 val = char; // no optimization >:(
+	asm#("
+	mov rax, 1
+	mov rdi, 1
+	mov rsi, rsp
+	mov rdx, 1
+	syscall
+	")
+
+	return val;
+}
+
 func main() {
-	i32 n = 12;
+	str ptr = "String";
+	print#("S ascii: ", *ptr);
 
-	*i32 ptr = &n;
-	*ptr = 15;
+	i32 idx = 0;
+	loop {
+		if idx >= 6 { break };
+		
+		putc(*(ptr + idx));
 
-	print#("n: ", n);
+		idx = idx + 1;
+	};
 }
