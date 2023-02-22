@@ -1,0 +1,6 @@
+func main() {
+    i32 a = 10("test");
+	u8 b = 12;
+	u64 c = a + b;
+}
+

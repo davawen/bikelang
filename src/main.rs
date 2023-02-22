@@ -1,15 +1,15 @@
 #![feature(box_syntax, box_patterns)]
 
 use std::fs;
-use clap::{ Parser, ArgAction };
+use clap::Parser;
 
 use crate::{
-    token::Lexer, utility::Inspect, ast::parse_ast,
+    token::Lexer, utility::Inspect, ast::parse_ast, error::ToCompilerError,
 };
 
 mod utility;
+mod error;
 mod ast;
-// mod old_ast;
 mod analysis;
 mod ir;
 mod token;
@@ -17,12 +17,16 @@ mod typed;
 
 #[derive(Parser)]
 struct Args {
+    /// Show lexed tokens and exit
+    #[arg(short)]
+    tokens: bool,
+
     /// Show the generated AST
     #[arg(short)]
     ast: bool,
 
     /// Show the type analysis
-    #[arg(short = 't')]
+    #[arg(short = 'z')]
     analyze: bool,
 
     /// Show the intermediate representation
@@ -35,21 +39,28 @@ struct Args {
     prog: String
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
+fn compile(args: Args, source: &str) -> error::Result<String> {
+    let mut lexer = Lexer::new(source);
 
-    let source = String::from_utf8(fs::read(args.prog).expect("A valid file"))?;
+    if args.tokens {
+        loop {
+            let t = lexer.next();
+            if t.token == token::Token::Eof {
+                return Ok(String::new()); 
+            }
 
-    let mut lexer = Lexer::new(&source);
+            println!("{}: {:?}", &source[t.start..t.end], t.token)
+        }
+    }
 
-    let ast = parse_ast(&mut lexer);
+    let ast = parse_ast(&mut lexer)?;
 
     if args.ast { println!("{ast:#?}") }
 
     let mut app = analysis::App::new();
 
-    app.insert_declarations(ast).log_err()?;
-    let app = app.type_check().log_err()?;
+    app.insert_declarations(ast).log_err().hydrate(0, 0)?;
+    let app = app.type_check().log_err().hydrate(0, 0)?;
 
     if args.analyze { println!("{app:#?}") }
 
@@ -59,26 +70,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.ir { println!("{ir:#?}") }
     if args.asm { println!("{}", ir.generate_asm()) }
 
-    fs::write("out.asm", ir.generate_full())?;
+    Ok(ir.generate_full())
+}
 
-    println!("$ nasm -f elf64 out.asm");
-    let out = std::process::Command::new("nasm")
-        .args(["-f", "elf64", "out.asm"])
-        .output().expect("failed to assemble");
+fn main() {
+    let args = Args::parse();
+    let source = String::from_utf8(fs::read(&args.prog).expect("couldn't open file")).expect("invalid utf-8 in file");
 
-    if !out.status.success() {
-        println!("error: {}", String::from_utf8(out.stderr)?);
+    match compile(args, &source) {
+        Ok(asm) => {
+            if asm.is_empty() { return; }
+
+            fs::write("out.asm", asm).expect("couldn't write assembly to file");
+
+            println!("$ nasm -f elf64 out.asm");
+            let out = std::process::Command::new("nasm")
+                .args(["-f", "elf64", "out.asm"])
+                .output().expect("failed to execute nasm");
+
+            if !out.status.success() {
+                eprintln!("assembling error:\n{}", String::from_utf8(out.stderr).expect("invalid utf-8"));
+                return;
+            }
+
+            println!("$ ld out.o");
+            let out = std::process::Command::new("ld")
+                .arg("out.o")
+                .output().expect("failed to execute ld");
+
+            if !out.status.success() {
+                eprintln!("link error:\n{}", String::from_utf8(out.stderr).expect("invalid utf-8"));
+                return;
+            }
+
+            println!("Compilation successful!");
+        }
+        Err(e) => {
+            eprintln!("Compilation failed:");
+            e.print(&source);
+        }
     }
-
-    println!("$ ld out.o");
-    let out = std::process::Command::new("ld")
-        .arg("out.o")
-        .output().expect("failed to link");
-
-    if !out.status.success() {
-        println!("error: {}", String::from_utf8(out.stderr)?);
-    }
-
-    println!("Compilation successful!");
-    Ok(())
 }

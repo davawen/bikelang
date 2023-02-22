@@ -1,3 +1,16 @@
+use crate::{ast::AstError, error::{Result, ToCompilerError}};
+
+#[derive(Debug, Clone)]
+pub struct Item {
+    pub token: Token,
+    pub start: usize,
+    pub end: usize
+}
+
+impl Item {
+    const EOF: Self = Item { token: Token::Eof, start: 0, end: 0 };
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Dir {
     #[default]
@@ -64,13 +77,13 @@ impl From<Keyword> for Token {
     }
 }
 
-pub fn get_string_literal(source: &mut impl Iterator<Item = char>) -> String {
+pub fn get_string_literal(source: &mut impl Iterator<Item = (usize, char)>) -> String {
     let mut out = String::new();
 
-    while let Some(c) = source.next()  {
+    while let Some((_, c)) = source.next()  {
         let c = match c {
             '\\' => { 
-                match source.next().unwrap() {
+                match source.next().unwrap().1 {
                     'n' => '\n',
                     '\\' => '\\',
                     '"' => '"',
@@ -88,7 +101,7 @@ pub fn get_string_literal(source: &mut impl Iterator<Item = char>) -> String {
 }
 
 pub struct Lexer {
-    tokens: Vec<Token>
+    tokens: Vec<Item>
 }
 
 impl Lexer {
@@ -96,10 +109,11 @@ impl Lexer {
         use Dir::*;
 
         let mut word = String::new();
-        let mut chars = source.chars().peekable();
+        let mut chars = source.char_indices().peekable();
         let mut out = Vec::new();
+        let mut start = 0;
 
-        while let Some(c) = chars.next() {
+        while let Some((idx, c)) = chars.next() {
             let token = match c {
                 c if c.is_alphanumeric() || c == '_' => {
                     word.push(c);
@@ -119,14 +133,15 @@ impl Lexer {
                         },
                     };
                     if let Some(token) = word_token {
-                        out.push(token);
+                        out.push(Item { token, start, end: idx });
+                        start = idx;
                     }
                     word = String::new();
 
                     macro_rules! then_or {
                         ($then:expr, $($c:expr, $or:expr),+) => {
                             match chars.peek() {
-                                $(Some($c) => {
+                                $(Some((_, $c)) => {
                                     chars.next();
                                     $or
                                 })+
@@ -135,7 +150,7 @@ impl Lexer {
                         };
                     }
 
-                    match c {
+                    let t = match c {
                         '(' => Some(Token::Paren(Left)),
                         ')' => Some(Token::Paren(Right)),
                         '{' => Some(Token::Brace(Left)),
@@ -169,22 +184,28 @@ impl Lexer {
                         '^' => then_or!(None, '^', Some(Token::Op(Operation::LogicalXor))),
                         '+' => Some(Token::Op(Operation::Plus)),
                         '*' => Some(Token::Op(Operation::Times)),
-                        '/' => {
-                            if let Some('/') = chars.peek() {
-                                chars.by_ref().skip_while(|&x| x != '\n').peekable().peek();
+                        '/' => then_or! {
+                            Some(Token::Op(Operation::Div)),
+                            '/',
+                            {
+                                chars.by_ref().skip_while(|&x| x.1 != '\n').peekable().peek();
                                 None
-                            } else {
-                                Some(Token::Op(Operation::Div))
                             }
-                        }
+                        },
                         '%' => Some(Token::Op(Operation::Modulus)),
                         _ => None,
+                    };
+
+                    if t.is_none() {
+                        start = idx+1;
                     }
+                    t
                 }
             };
 
             if let Some(token) = token {
-                out.push(token);
+                out.push(Item { token, start, end: idx+1 });
+                start = idx+1;
             }
         }
 
@@ -193,18 +214,21 @@ impl Lexer {
         Lexer { tokens: out }
     }
 
-    pub fn next(&mut self) -> Token {
-        self.tokens.pop().unwrap_or(Token::Eof)
+    pub fn next(&mut self) -> Item {
+        self.tokens.pop().unwrap_or(Item::EOF)
     }
 
-    pub fn expect(&mut self, tok: Token) {
-        if self.next() != tok {
-            panic!("Wrong token");
+    pub fn expect(&mut self, tok: Token) -> Result<()> {
+        let n = self.next();
+        if n.token == tok {
+            Ok(())
+        } else {
+            Err(AstError::ExpectedToken(tok, n.token)).hydrate(n.start, n.end)
         }
     }
 
-    pub fn peek(&self) -> &Token {
-        self.tokens.last().unwrap_or(&Token::Eof)
+    pub fn peek(&self) -> &Item {
+        self.tokens.last().unwrap_or(&Item::EOF)
     }
 }
 
