@@ -235,12 +235,12 @@ impl Node {
                 Ok(Type::Void.into())
             },
             Node::Expr { op, ty, lhs, rhs } => {
-                let lhs = lhs.set_type(app, definition, expect)?;
-                let rhs = rhs.set_type(app, definition, expect)?;
-
                 use BinaryOperation::*;
                 let descriptor = match op {
                     Add | Sub | Div | Mul | Modulus => {
+                        let lhs = lhs.set_type(app, definition, expect)?;
+                        let rhs = rhs.set_type(app, definition, expect)?;
+
                         lhs.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers")?;
                         rhs.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers")?;
 
@@ -253,12 +253,18 @@ impl Node {
                         
                     }
                     Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => {
+                        let lhs = lhs.set_type(app, definition, None)?;
+                        let rhs = rhs.set_type(app, definition, Some(&lhs.ty))?;
+
                         rhs.expect(lhs.ty.into(), "cannot compare different types")?;
                         Type::Boolean.into()
                     }
                     LogicalAnd | LogicalOr | LogicalXor => {
+                        let lhs = lhs.set_type(app, definition, Some(&Type::Boolean))?;
+                        let rhs = rhs.set_type(app, definition, Some(&Type::Boolean))?;
+
                         lhs.expect(Type::Boolean.into(), "logical operations only apply to booleans")?;
-                        rhs.expect(Type::Boolean.into(), "logical operations only apply to booleans")?.into()
+                        rhs.expect(Type::Boolean.into(), "logical operations only apply to booleans")?
                     }
                     Assignment => unreachable!()
                 };

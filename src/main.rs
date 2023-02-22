@@ -1,6 +1,7 @@
 #![feature(box_syntax, box_patterns)]
 
 use std::fs;
+use clap::{ Parser, ArgAction };
 
 use crate::{
     token::Lexer, utility::Inspect, ast::parse_ast,
@@ -14,31 +15,49 @@ mod ir;
 mod token;
 mod typed;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<_> = std::env::args().collect();
-    if args.len() == 1 {
-        return Err("no arguments given".into());
-    }
+#[derive(Parser)]
+struct Args {
+    /// Show the generated AST
+    #[arg(short)]
+    ast: bool,
 
-    let source = String::from_utf8(fs::read(&args[1])?)?;
+    /// Show the type analysis
+    #[arg(short = 't')]
+    analyze: bool,
+
+    /// Show the intermediate representation
+    #[arg(short)]
+    ir: bool,
+
+    /// Print the resulting assembly
+    #[arg(short = 's')]
+    asm: bool,
+    prog: String
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
+    let source = String::from_utf8(fs::read(args.prog).expect("A valid file"))?;
 
     let mut lexer = Lexer::new(&source);
 
     let ast = parse_ast(&mut lexer);
-    // println!("{ast:#?}");
+
+    if args.ast { println!("{ast:#?}") }
 
     let mut app = analysis::App::new();
 
     app.insert_declarations(ast).log_err()?;
     let app = app.type_check().log_err()?;
 
-    println!("{app:#?}");
+    if args.analyze { println!("{app:#?}") }
 
     let mut ir = ir::Ir::from_app(app);
     ir.optimize();
 
-    println!("{ir:#?}");
-    println!("{}", ir.generate_asm());
+    if args.ir { println!("{ir:#?}") }
+    if args.asm { println!("{}", ir.generate_asm()) }
 
     fs::write("out.asm", ir.generate_full())?;
 

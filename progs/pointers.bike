@@ -13,11 +13,13 @@ func putc(u8 char) -> u8 {
 
 func main() {
 	str ptr = "String";
-	print#("S ascii: ", *ptr);
+	print#("S ascii: ");
 
-	i32 idx = 0;
+	u64 idx = 0;
 	loop {
 		if idx >= 6 { break };
+
+		*(ptr + idx) = *(ptr + idx) + 1;
 		
 		putc(*(ptr + idx));
 

@@ -114,7 +114,7 @@ impl Token {
             }
             Paren(Dir::Left) => 70, // operator ()
             Hash => 70,
-            Word(_) => 5, // type binding
+            Word(_) => 5, 
             Brace(Dir::Left) => 1, // allow stopping at opening brace
             Paren(Dir::Right) | Brace(Dir::Right) | Keyword(_) | Comma | Semicolon | Eof => 0,
             _ => unreachable!("{self:#?}")
@@ -289,10 +289,11 @@ pub fn parse_block(lexer: &mut Lexer) -> Vec<Node> {
 
 fn expression(lexer: &mut Lexer, rbp: u32) -> Node {
     let mut t = lexer.next();
-
     let mut left = t.nud(lexer);
+
     while lexer.peek().left_binding_power() > rbp {
         t = lexer.next();
+
         left = t.led(lexer, left);
     }
 
