@@ -55,7 +55,7 @@ fn compile(args: Args, source: &str) -> error::Result<String> {
 
     let ast = parse_ast(&mut lexer)?;
 
-    if args.ast { println!("{ast:#?}") }
+    if args.ast { println!("{ast}") }
 
     let mut app = analysis::App::new();
 

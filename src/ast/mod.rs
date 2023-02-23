@@ -2,6 +2,8 @@ use thiserror::Error;
 
 use crate::{typed::Type, token::{Token, Lexer, Operation, Dir, self, Item}, error::{Result, ToCompilerError}, utility::Bounds};
 
+mod format;
+
 #[derive(Debug, Clone)]
 pub struct Ast {
     pub node: Node,
