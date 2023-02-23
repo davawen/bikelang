@@ -1,18 +1,11 @@
 use std::fmt::Display;
-use thiserror::Error;
 
-use crate::{ast::{AstError, self}, typed::TypeError/* , analysis::AnalysisError */, token};
-
-#[derive(Debug, Error)]
-enum AnalysisError {
-
-}
+use crate::{ast::{AstError, self}, typed::TypeError, analysis::AnalysisError, token, utility::Bounds};
 
 #[derive(Debug)]
 pub struct CompilerError {
     error: ErrorType,
-    start: usize,
-    end: usize
+    bounds: Bounds
 }
 
 impl Display for CompilerError {
@@ -48,22 +41,21 @@ impl CompilerError {
             }
         };
 
-        let line_start = source[..=self.start]
+        let line_start = source[..=self.bounds.start]
             .rfind(|x| x == '\n')
             .map(|i| i + 1) // don't include the newline
             .unwrap_or(0);
 
-        let line_end = source[self.start..]
+        let line_end = source[self.bounds.start..]
             .find(|x| x == '\n')
-            .map(|i| i + self.start)
+            .map(|i| i + self.bounds.start)
             .unwrap_or(source.len());
 
-        let cutoff_end = self.end.min(line_end);
+        let cutoff_end = self.bounds.end.min(line_end);
 
         println!("     |");
-        print!("{: >4} | ", get_line_number(line_start));
-        println!("{}", &source[line_start..line_end]);
-        println!("     | {}{}", " ".repeat(self.start - line_start), "^".repeat(cutoff_end - self.start));
+        println!("{: >4} | {}", get_line_number(line_start), &source[line_start..line_end]);
+        println!("     | {}{}", " ".repeat(self.bounds.start - line_start), "^".repeat(cutoff_end - self.bounds.start));
     }
 }
 
@@ -71,53 +63,50 @@ pub type Result<T> = std::result::Result<T, CompilerError>;
 
 pub trait ToCompilerError where Self: Sized {
     type Out;
-    fn at(self, start: usize, end: usize) -> Self::Out;
+    fn at(self, bounds: Bounds) -> Self::Out;
 
     fn at_item(self, item: &token::Item) -> Self::Out {
-        self.at(item.start, item.end)
+        self.at(item.bounds)
     }
 
     fn at_ast(self, ast: &ast::Ast) -> Self::Out {
-        self.at(ast.start, ast.end)
+        self.at(ast.bounds)
     }
 }
 
 impl ToCompilerError for AstError {
     type Out = CompilerError;
-    fn at(self, start: usize, end: usize) -> Self::Out {
+    fn at(self, bounds: Bounds) -> Self::Out {
         CompilerError {
             error: ErrorType::Ast(self),
-            start,
-            end,
+            bounds
         }
     }
 }
 
 impl ToCompilerError for AnalysisError {
     type Out = CompilerError;
-    fn at(self, start: usize, end: usize) -> Self::Out {
+    fn at(self, bounds: Bounds) -> Self::Out {
         CompilerError {
             error: ErrorType::Analysis(self),
-            start,
-            end,
+            bounds
         }
     }
 }
 
 impl ToCompilerError for TypeError {
     type Out = CompilerError;
-    fn at(self, start: usize, end: usize) -> Self::Out {
+    fn at(self, bounds: Bounds) -> Self::Out {
         CompilerError {
             error: ErrorType::Type(self),
-            start,
-            end,
+            bounds
         }
     }
 }
 
 impl<T, E: ToCompilerError<Out = CompilerError>> ToCompilerError for std::result::Result<T, E> {
     type Out = Result<T>;
-    fn at(self, start: usize, end: usize) -> Self::Out {
-        self.map_err(|e| e.at(start, end))
+    fn at(self, bounds: Bounds) -> Self::Out {
+        self.map_err(|e| e.at(bounds))
     }
 }

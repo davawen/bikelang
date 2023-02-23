@@ -1,5 +1,48 @@
 use std::fmt::Display;
 
+#[derive(Debug, Clone, Copy)]
+pub struct Bounds {
+    pub start: usize,
+    pub end: usize
+}
+
+impl Bounds {
+    pub const ZERO: Self = Bounds { start: 0, end: 0 };
+
+    pub fn with_start(mut self, start: usize) -> Self {
+        self.start = start;
+        self
+    }
+
+    pub fn with_end(mut self, end: usize) -> Self {
+        self.end = end;
+        self
+    }
+
+    pub fn with_start_of(mut self, bounds: Bounds) -> Self {
+        self.start = bounds.start;
+        self
+    }
+
+    pub fn with_end_of(mut self, bounds: Bounds) -> Self {
+        self.end = bounds.end;
+        self
+    }
+
+    pub fn extend(mut self, bounds: Bounds) -> Self {
+        if bounds.start < self.start { self.start = bounds.start }
+        if bounds.end > self.end { self.end = bounds.end }
+        self
+    }
+}
+
+impl std::ops::Index<Bounds> for str {
+    type Output = str;
+    fn index(&self, index: Bounds) -> &Self::Output {
+        &self[index.start..index.end]
+    }
+}
+
 pub trait PushIndex {
     type Item;
     fn push_idx(&mut self, value: Self::Item) -> usize;

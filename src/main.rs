@@ -10,7 +10,7 @@ use crate::{
 mod utility;
 mod error;
 mod ast;
-// mod analysis;
+mod analysis;
 // mod ir;
 mod token;
 mod typed;
@@ -49,7 +49,7 @@ fn compile(args: Args, source: &str) -> error::Result<String> {
                 return Ok(String::new()); 
             }
 
-            println!("{}: {:?}", &source[t.start..t.end], t.token)
+            println!("{}: {:?}", &source[t.bounds], t.token)
         }
     }
 
@@ -57,13 +57,13 @@ fn compile(args: Args, source: &str) -> error::Result<String> {
 
     if args.ast { println!("{ast:#?}") }
 
+    let mut app = analysis::App::new();
+
+    app.insert_declarations(ast)?;
+    let app = app.type_check()?;
+
+    if args.analyze { println!("{app:#?}") }
     Ok(String::new())
-    // let mut app = analysis::App::new();
-    //
-    // app.insert_declarations(ast).log_err().hydrate(0, 0)?;
-    // let app = app.type_check().log_err().hydrate(0, 0)?;
-    //
-    // if args.analyze { println!("{app:#?}") }
     //
     // let mut ir = ir::Ir::from_app(app);
     // ir.optimize();
@@ -79,7 +79,7 @@ fn main() {
     let source = {
         let source = String::from_utf8(fs::read(&args.prog).expect("couldn't open file")).expect("invalid utf-8");
 
-        // Very roundabout copy heavy-way to replace tabs with spaces but I couldn't find an easier one :(
+        // Very roundabout copy-heavy way to replace tabs with spaces but I couldn't find an easier one :(
         // Needed for nice error messages (need to replace any other multi-width characters)
         let mut out = String::with_capacity(source.capacity());
         for c in source.chars() {

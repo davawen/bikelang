@@ -1,12 +1,11 @@
 use thiserror::Error;
 
-use crate::{typed::Type, token::{Token, Lexer, Operation, Dir, self, Item}, error::{Result, ToCompilerError}};
+use crate::{typed::Type, token::{Token, Lexer, Operation, Dir, self, Item}, error::{Result, ToCompilerError}, utility::Bounds};
 
 #[derive(Debug, Clone)]
 pub struct Ast {
     pub node: Node,
-    pub start: usize,
-    pub end: usize
+    pub bounds: Bounds
 }
 
 #[derive(Debug, Clone)]
@@ -123,40 +122,29 @@ impl BinaryOperation {
 }
 
 impl Node {
-    fn ast(self, start: usize, end: usize) -> Ast {
+    fn ast(self, bounds: Bounds) -> Ast {
         Ast {
             node: self,
-            start,
-            end
+            bounds
         }
     }
 
     fn ast_from(self, value: Item) -> Ast {
-        self.ast(value.start, value.end)
+        self.ast(value.bounds)
     }
 }
 
 impl Ast {
-    fn new(start: usize, end: usize, node: Node) -> Self {
+    fn new(bounds: Bounds, node: Node) -> Self {
         Ast {
             node,
-            start,
-            end
+            bounds
         }
     }
 
-    fn extend_start(mut self, start: usize) -> Ast {
-        if self.start > start { self.start = start; }
+    pub fn extend(self, bounds: Bounds) -> Self {
+        self.bounds.extend(bounds);
         self
-    }
-
-    fn extend_end(mut self, end: usize) -> Ast {
-        if self.end < end { self.end = end; }
-        self
-    }
-
-    fn extend(self, start: usize, end: usize) -> Ast {
-        self.extend_start(start).extend_end(end)
     }
 }
 
@@ -186,9 +174,9 @@ impl Item {
     fn nud(self, lexer: &mut Lexer) -> Result<Ast> {
         use Token::*;
         let node = match self.token {
-            Number(n) => Node::Number(n, Type::Void).ast(self.start, self.end),
-            StringLiteral(s) => Node::StringLiteral(s).ast(self.start, self.end),
-            Word(name) => Node::Identifier(name, Type::Void).ast(self.start, self.end),
+            Number(n) => Node::Number(n, Type::Void).ast(self.bounds),
+            StringLiteral(s) => Node::StringLiteral(s).ast(self.bounds),
+            Word(name) => Node::Identifier(name, Type::Void).ast(self.bounds),
             Op(op) => {
                 let (op, power) = match op {
                     Operation::Minus => (UnaryOperation::Negation, 60),
@@ -200,7 +188,7 @@ impl Item {
 
                 let value = box expression(lexer, power)?;
                 Ast::new(
-                    self.start, value.end,
+                    self.bounds.with_end_of(value.bounds),
                     Node::UnaryExpr {
                         op,
                         ty: Type::Void,
@@ -214,7 +202,7 @@ impl Item {
                     Func => {
                         let name = lexer.next();
                         let Token::Word(name) = name.token
-                            else { return Err(AstError::Expected("a function name", name.token)).at(name.start, name.end) };
+                            else { return Err(AstError::Expected("a function name", name.token)).at(name.bounds) };
 
                         lexer.expect(Token::Paren(Dir::Left))?;
                         let (parameter_list, _) = parameter_list(lexer)?;
@@ -227,7 +215,7 @@ impl Item {
 
                         let body = box expression(lexer, 0)?;
                         Ast::new(
-                            self.start, body.end,
+                            self.bounds.with_end_of(body.bounds),
                             Node::FuncDef {
                                 name,
                                 parameter_list,
@@ -240,7 +228,7 @@ impl Item {
                         let condition = box expression(lexer, 1)?;
                         let body = box expression(lexer, 0)?;
                         Ast::new(
-                            self.start, body.end,
+                            self.bounds.with_end_of(body.bounds),
                             Node::If {
                                 condition,
                                 body
@@ -250,16 +238,16 @@ impl Item {
                     Loop => {
                         let body = box expression(lexer, 0)?;
                         Ast::new(
-                            self.start, body.end,
+                            self.bounds.with_end_of(body.bounds),
                             Node::Loop {
                                 body
                             }
                         )
                     }
-                    Break => Node::Break.ast(self.start, self.end),
+                    Break => Node::Break.ast(self.bounds),
                     Return => {
                         let expr = box expression(lexer, 0)?;
-                        Ast::new(self.start, expr.end, Node::Return(expr))
+                        Ast::new(self.bounds.with_end_of(expr.bounds), Node::Return(expr))
                     }
                 }
             }
@@ -267,11 +255,11 @@ impl Item {
                 let inner = expression(lexer, 0)?;
                 let rparen = lexer.expect(Paren(Dir::Right))?;
 
-                inner.extend(self.start, rparen.end)
+                inner.extend(self.bounds.with_end_of(rparen.bounds))
             }
             Brace(Dir::Left) => {
                 let (inner, rtoken) = parse_block(lexer)?;
-                Node::Block(inner, Type::Void).ast(self.start, rtoken.end)
+                Node::Block(inner, Type::Void).ast(self.bounds.with_end_of(rtoken.bounds))
             }
             Semicolon => Node::Empty.ast_from(self),
             _ => unreachable!("{self:#?}")
@@ -306,7 +294,7 @@ impl Item {
 
                 let rhs = box expression(lexer, power)?;
                 Ast::new(
-                    left.start, rhs.end,
+                    left.bounds.with_end_of(rhs.bounds),
                     Node::Expr {
                         op,
                         ty: Type::Void,
@@ -319,22 +307,22 @@ impl Item {
                 Node::Definition {
                     typename: Type::from_node(left.node).unwrap(),
                     name
-                }.ast(left.start, self.end)
+                }.ast(left.bounds.with_end_of(self.bounds))
             }
             Paren(Dir::Left) => { // parenthesis operator = function call
                 let Node::Identifier(name, _) = left.node
-                    else { return Err(AstError::ExpectedNode("a function name", left.node)).at(left.start, left.end) };
+                    else { return Err(AstError::ExpectedNode("a function name", left.node)).at(left.bounds)};
 
                 let (parameter_list, rtoken) = parameter_list(lexer)?;
                 Node::Call {
                     name,
                     return_type: Type::Void,
                     parameter_list
-                }.ast(left.start, rtoken.end)
+                }.ast(left.bounds.with_end_of(rtoken.bounds))
             }
             Hash => {
                 let Node::Identifier(name, _) = left.node
-                    else { return Err(AstError::ExpectedNode("an intrisic name", left.node)).at(left.start, left.end) };
+                    else { return Err(AstError::ExpectedNode("an intrisic name", left.node)).at(left.bounds) };
 
                 lexer.expect(Token::Paren(Dir::Left))?;
                 let (list, rtoken) = parameter_list(lexer)?;
@@ -342,9 +330,9 @@ impl Item {
                 let intrisic = match name.as_str() {
                     "asm" => Intrisic::Asm(box list.into_iter().next().unwrap()),
                     "print" => Intrisic::Print(list),
-                    _ => return Err(AstError::UnknownIntrisic(name)).at(left.start, left.end)
+                    _ => return Err(AstError::UnknownIntrisic(name)).at(left.bounds)
                 };
-                Node::Intrisic(intrisic).ast(left.start, rtoken.end)
+                Node::Intrisic(intrisic).ast(left.bounds.with_end_of(rtoken.bounds))
             }
             _ => unreachable!("{self:#?}")
         };
@@ -375,7 +363,7 @@ pub fn parse_block(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
         let next = lexer.peek();
 
         if next.token == Token::Semicolon {
-            block.push(Ast::new(expr.start, next.end, Node::Statement(box expr)));
+            block.push(Ast::new(expr.bounds.with_end_of(next.bounds), Node::Statement(box expr)));
             lexer.next();
         }
         else {
@@ -405,6 +393,9 @@ pub fn parse_ast(lexer: &mut Lexer) -> Result<Ast> {
         root.push(expression(lexer, 0)?);
     }
 
-    let (start, end) = ( root.first().map(|x| x.start).unwrap_or(0), root.last().map(|x| x.end).unwrap_or(0) );
-    Ok(Node::Block(root, Type::Void).ast(start, end))
+    let bounds = Bounds {
+        start: root.first().map(|x| x.bounds.start).unwrap_or(0),
+        end: root.last().map(|x| x.bounds.end).unwrap_or(0) 
+    };
+    Ok(Node::Block(root, Type::Void).ast(bounds))
 }

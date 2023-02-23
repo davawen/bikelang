@@ -1,14 +1,13 @@
-use crate::{ast::AstError, error::{Result, ToCompilerError}};
+use crate::{ast::AstError, error::{Result, ToCompilerError}, utility::Bounds};
 
 #[derive(Debug, Clone)]
 pub struct Item {
     pub token: Token,
-    pub start: usize,
-    pub end: usize
+    pub bounds: Bounds
 }
 
 impl Item {
-    const EOF: Self = Item { token: Token::Eof, start: 0, end: 0 };
+    const EOF: Self = Item { token: Token::Eof, bounds: Bounds::ZERO };
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -133,7 +132,10 @@ impl Lexer {
                         },
                     };
                     if let Some(token) = word_token {
-                        out.push(Item { token, start, end: idx });
+                        out.push(Item {
+                            token,
+                            bounds: Bounds { start, end: idx}
+                        });
                         start = idx;
                     }
                     word = String::new();
@@ -204,7 +206,10 @@ impl Lexer {
             };
 
             if let Some(token) = token {
-                out.push(Item { token, start, end: idx+1 });
+                out.push(Item {
+                    token,
+                    bounds: Bounds { start, end: idx+1 }
+                });
                 start = idx+1;
             }
         }
@@ -223,7 +228,7 @@ impl Lexer {
         if n.token == tok {
             Ok(n)
         } else {
-            Err(AstError::ExpectedToken(tok, n.token)).at(n.start, n.end)
+            Err(AstError::ExpectedToken(tok, n.token)).at(n.bounds)
         }
     }
 

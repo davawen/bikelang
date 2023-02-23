@@ -1,8 +1,10 @@
+use std::ops::Not;
+
 use indexmap::IndexMap;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
-use crate::{ast::{Node, Intrisic, BinaryOperation, UnaryOperation}, utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType, TypeDescriptor}, super_type_or};
+use crate::{ast::{Node, Intrisic, BinaryOperation, UnaryOperation, Ast}, utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType, TypeDescriptor}, super_type_or, error::{Result, ToCompilerError}};
 
 #[derive(Debug)]
 pub struct App {
@@ -23,7 +25,7 @@ pub struct Function {
 pub struct FunctionBody {
     #[deref]
     #[deref_mut]
-    pub body: Vec<Node>,
+    pub body: Vec<Ast>,
     pub definition: FunctionIndex
 }
 
@@ -44,17 +46,7 @@ pub enum AnalysisError {
     WrongArgumentNumber(String, usize, usize),
     #[error("Number {0} too big for storage in {1:?}.")]
     NumberTooBig(i64, Type),
-    #[error("{0}")]
-    Type(TypeError)
 }
-
-impl From<TypeError> for AnalysisError {
-    fn from(value: TypeError) -> Self {
-        AnalysisError::Type(value)
-    }
-}
-
-pub type Result<T> = std::result::Result<T, AnalysisError>;
 
 impl Function {
     fn is_declaration(node: &Node) -> bool {
@@ -62,29 +54,31 @@ impl Function {
     }
 
     /// Inserts a function declaration and body into an app
-    fn insert(app: &mut App, node: Node) -> Result<()> {
-        let Node::FuncDef { name, return_type, parameter_list, body } = node
-            else { return Err(AnalysisError::WrongNodeType("No function definition given...", node)) };
+    fn insert(app: &mut App, definition: Ast) -> Result<()> {
+        let Node::FuncDef { name, return_type, parameter_list, box body } = definition.node
+            else { return Err(AnalysisError::WrongNodeType("No function definition given...", definition.node)).at(definition.bounds) };
 
         let mut variables = IndexMap::new();
         let mut arguments = Vec::new();
 
         for v in parameter_list {
-            let Node::Definition { name, typename } = v else { return Err(AnalysisError::WrongNodeType("An argument definition", v)) };
+            let Node::Definition { name, typename } = v.node
+                else { return Err(AnalysisError::WrongNodeType("An argument definition", v.node)).at(v.bounds) };
 
             let (idx, _) = variables.insert_full(name, typename);
             arguments.push(idx);
         }
 
-        let Node::Block(body, _) = *body else { return Err(AnalysisError::WrongNodeType("A function body", *body)) };
+        let Node::Block(body, _) = body.node 
+            else { return Err(AnalysisError::WrongNodeType("A function body", body.node)).at(body.bounds) };
 
-        fn get_variable_definitions(variables: &mut IndexMap<String, Type>, node: &Node) -> Result<()> {
-            match node {
+        fn get_variable_definitions(variables: &mut IndexMap<String, Type>, ast: &Ast) -> Result<()> {
+            match &ast.node {
                 Node::Definition { name, typename } => {
                     if !variables.contains_key(name) {
                         variables.insert(name.clone(), typename.clone());
                     } else {
-                        return Err(AnalysisError::Redefinition("variable", name.clone()));
+                        return Err(AnalysisError::Redefinition("variable", name.clone())).at_ast(&ast);
                     }
                 }
                 Node::UnaryExpr { value, .. } => {
@@ -132,14 +126,14 @@ impl Function {
     }
 }
 
-impl Node {
+impl Ast {
     /// Returns the type associated with this node by recursively computing it
     ///
     /// * `app`: Global application state (functions and types)
     /// * `definition`: Definition of the current function
     /// * `expect`: Type that's expected from the node, for simple coercions
     pub fn set_type(&mut self, app: &App, definition: &Function, expect: Option<&Type>) -> Result<TypeDescriptor> {
-        match self {
+        match &mut self.node {
             Node::Number(value, ty) => {
                 *ty = Type::Int32;
                 if let Some(expect) = expect {
@@ -151,31 +145,34 @@ impl Node {
                 if *value < 2_i64.saturating_pow(ty.size()*8) {
                     Ok(ty.clone().into())
                 } else {
-                    Err(AnalysisError::NumberTooBig(*value, ty.clone()))
+                    Err(AnalysisError::NumberTooBig(*value, ty.clone())).at_ast(self)
                 }
             },
             Node::StringLiteral(_) => Ok(Type::string().into()),
             Node::Identifier(name, typename) => {
                 *typename = definition
                     .variables.get(name).cloned()
-                    .ok_or(AnalysisError::Unknown("variable", name.to_owned()))?;
+                    .ok_or(AnalysisError::Unknown("variable", name.to_owned()))
+                    .at(self.bounds)?;
+
                 Ok(typename.clone().addressable())
             }
             Node::Definition { name: _, typename } => Ok(typename.clone().addressable()),
             Node::Intrisic(intrisic) => {
                 match intrisic {
-                    Intrisic::Asm(x) => {
-                        if !matches!(&**x, Node::StringLiteral(_)) {
-                            return Err(AnalysisError::WrongNodeType("a compile-time string literal", (**x).clone()));
+                    Intrisic::Asm(box x) => {
+                        if matches!(x.node, Node::StringLiteral(_)).not() {
+                            return Err(AnalysisError::WrongNodeType("a compile-time string literal", x.node.clone()))
+                                .at_ast(x);
                         }
                     },
                     Intrisic::Print(args) => {
-                        for ty in args.iter_mut().map(|node| node.set_type(app, definition, None)) {
+                        for (bounds, ty) in args.iter_mut().map(|node| (node.bounds, node.set_type(app, definition, None))) {
                             let ty = ty?;
                             ty.expect_ref(
                                 super_type_or!(Type::string(), SuperType::Integer),
                                 "print intrisic cannot format the given type"
-                            )?;
+                            ).at(bounds)?;
                         }
                     }
                 }
@@ -184,17 +181,19 @@ impl Node {
             }
             Node::Call { name, parameter_list, return_type } => {
                 let func = app.function_definitions.get(name)
-                    .ok_or(AnalysisError::Unknown("function", name.clone()))?;
+                    .ok_or(AnalysisError::Unknown("function", name.clone()))
+                    .at(self.bounds)?;
 
                 if func.arguments.len() != parameter_list.len() {
                     return Err(AnalysisError::WrongArgumentNumber(name.clone(), func.arguments.len(), parameter_list.len()))
+                        .at_ast(self)
                 }
 
                 for (param, arg) in func.arguments.iter().map(|&a| func.variables[a].clone()) // map argument index into type index
                     .zip(parameter_list.iter_mut())
                 {
-                    let arg = arg.set_type(app, definition, Some(&param))?;
-                    arg.ty.expect_ref(param.into(), "wrong argument type to function")?;
+                    let arg_type = arg.set_type(app, definition, Some(&param))?;
+                    arg_type.ty.expect_ref(param.into(), "wrong argument type to function").at_ast(arg)?;
                 }
 
                 *return_type = func.return_type.clone();
@@ -215,56 +214,56 @@ impl Node {
                         true => Ok(Type::ptr(value.ty).into()),
                         false => Err(TypeError::InvalidOperation("can't take address of r-value", value.ty))
                     }
-                }?;
+                }.at(self.bounds)?;
                 *ty = descriptor.ty.clone();
 
                 Ok(descriptor)
             }
             Node::Expr { op: BinaryOperation::Assignment, ty: _, box lhs, box rhs } => {
-                match lhs {
+                match &lhs.node {
                     Node::Identifier(..) | Node::Definition { .. } | Node::UnaryExpr { op: UnaryOperation::Deref, .. } => (),
-                    _ => {
-                        Err(AnalysisError::WrongNodeType("given node isn't assignable to", lhs.clone()))?;
+                    node => {
+                        return Err(AnalysisError::WrongNodeType("given node isn't assignable to", node.clone())).at_ast(lhs);
                     }
                 }
 
                 let expected_type = lhs.set_type(app, definition, None)?;
                 let rhs_type = rhs.set_type(app, definition, Some(&expected_type.ty))?;
 
-                rhs_type.expect(expected_type.ty.into(), "cannot assign value to variable")?;
+                rhs_type.expect(expected_type.ty.into(), "cannot assign value to variable").at_ast(rhs)?;
                 Ok(Type::Void.into())
             },
-            Node::Expr { op, ty, lhs, rhs } => {
+            Node::Expr { op, ty, box lhs, box rhs } => {
                 use BinaryOperation::*;
                 let descriptor = match op {
                     Add | Sub | Div | Mul | Modulus => {
-                        let lhs = lhs.set_type(app, definition, expect)?;
-                        let rhs = rhs.set_type(app, definition, expect)?;
+                        let left = lhs.set_type(app, definition, expect)?;
+                        let right = rhs.set_type(app, definition, expect)?;
 
-                        lhs.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers")?;
-                        rhs.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers")?;
+                        left.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers").at_ast(lhs)?;
+                        right.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers").at_ast(rhs)?;
 
                         let ptr = SuperType::Ptr;
 
-                        if ptr.verify(&lhs.ty) { lhs }
-                        else if ptr.verify(&rhs.ty) { rhs }
-                        else if lhs.ty.size() > rhs.ty.size() { lhs }
-                        else { rhs }
+                        if ptr.verify(&left.ty) { left }
+                        else if ptr.verify(&right.ty) { right }
+                        else if left.ty.size() > right.ty.size() { left }
+                        else { right }
                         
                     }
                     Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => {
-                        let lhs = lhs.set_type(app, definition, None)?;
-                        let rhs = rhs.set_type(app, definition, Some(&lhs.ty))?;
+                        let left = lhs.set_type(app, definition, None)?;
+                        let right = rhs.set_type(app, definition, Some(&left.ty))?;
 
-                        rhs.expect(lhs.ty.into(), "cannot compare different types")?;
+                        right.expect(left.ty.into(), "cannot compare different types").at(self.bounds)?;
                         Type::Boolean.into()
                     }
                     LogicalAnd | LogicalOr | LogicalXor => {
-                        let lhs = lhs.set_type(app, definition, Some(&Type::Boolean))?;
-                        let rhs = rhs.set_type(app, definition, Some(&Type::Boolean))?;
+                        let left = lhs.set_type(app, definition, Some(&Type::Boolean))?;
+                        let right = rhs.set_type(app, definition, Some(&Type::Boolean))?;
 
-                        lhs.expect(Type::Boolean.into(), "logical operations only apply to booleans")?;
-                        rhs.expect(Type::Boolean.into(), "logical operations only apply to booleans")?
+                        left.expect(Type::Boolean.into(), "logical operations only apply to booleans").at_ast(lhs)?;
+                        right.expect(Type::Boolean.into(), "logical operations only apply to booleans").at_ast(rhs)?
                     }
                     Assignment => unreachable!()
                 };
@@ -272,21 +271,24 @@ impl Node {
 
                 Ok(descriptor)
             }
-            Node::If { condition, body } => {
-                let condition = condition.set_type(app, definition, None)?;
-                condition.expect(Type::Boolean.into(), "if statement condition needs to be boolean")?;
+            Node::If { box condition, box body } => {
+                let cond_type = condition.set_type(app, definition, None)?;
+                cond_type.expect(Type::Boolean.into(), "if statement condition needs to be boolean").at_ast(condition)?;
 
                 body.set_type(app, definition, None)?;
                 Ok(Type::Void.into())
             }
-            Node::Loop { body } => {
+            Node::Loop { box body } => {
                 body.set_type(app, definition, None)?;
                 Ok(Type::Void.into())
             }
             Node::Break => Ok(Type::Void.into()),
-            Node::Return( expr ) => {
+            Node::Return( box expr ) => {
                 let out = expr.set_type(app, definition, Some(&definition.return_type))?;
-                out.expect(definition.return_type.clone().into(), "return type doesn't correspond to the given function")?;
+                out.expect(
+                    definition.return_type.clone().into(),
+                    "return type doesn't correspond to the given function"
+                ).at_ast(expr)?;
 
                 Ok(Type::Void.into())
             }
@@ -307,13 +309,13 @@ impl Node {
             }
             Node::Empty => Ok(Type::Void.into()),
             Node::FuncDef { .. } => {
-                Err(AnalysisError::WrongNodeType("something that isn't a function definition what the fuck", self.clone()))
+                Err(AnalysisError::WrongNodeType("something that isn't a function definition what the fuck", self.node.clone())).at_ast(self)
             }
         }
     }
 
     pub fn get_type(&self) -> Type {
-        match self {
+        match &self.node {
             Node::Call { return_type, .. } => return_type,
             Node::UnaryExpr { ty, .. } => ty,
             Node::Expr { ty, .. } => ty,
@@ -352,11 +354,12 @@ impl App {
         }
     }
 
-    pub fn insert_declarations(&mut self, root: Node) -> Result<()> {
-        let Node::Block(root, _) = root else { Err(AnalysisError::WrongNodeType("A list of top-level statements", root.clone()))? };
+    pub fn insert_declarations(&mut self, root: Ast) -> Result<()> {
+        let Node::Block(root, _) = root.node
+            else { return Err(AnalysisError::WrongNodeType("A list of top-level statements", root.node.clone())).at_ast(&root) };
 
         for statement in root {
-            if Function::is_declaration(&statement) {
+            if Function::is_declaration(&statement.node) {
                 Function::insert(self, statement)?;
             }
         }
