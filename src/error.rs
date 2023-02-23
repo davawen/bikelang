@@ -1,6 +1,12 @@
 use std::fmt::Display;
+use thiserror::Error;
 
-use crate::{ast::AstError, typed::TypeError, analysis::AnalysisError, token};
+use crate::{ast::{AstError, self}, typed::TypeError/* , analysis::AnalysisError */, token};
+
+#[derive(Debug, Error)]
+enum AnalysisError {
+
+}
 
 #[derive(Debug)]
 pub struct CompilerError {
@@ -25,31 +31,39 @@ enum ErrorType {
 
 impl CompilerError {
     pub fn print(&self, source: &str) {
-        match &self.error {
-            ErrorType::Ast(e) => println!("error: {e}"),
-            ErrorType::Analysis(e) => println!("error: {e}"),
-            ErrorType::Type(e) => println!("error: {e}")
-        }
+        println!("\x1b[31mcompile error\x1b[0m: {}",
+            match &self.error {
+                ErrorType::Ast(e) => format!("{e}"),
+                ErrorType::Analysis(e) => format!("{e}"),
+                ErrorType::Type(e) => format!("{e}")
+            }
+        );
+
+        // Print is allowed to be horribly inefficient as it should only ever be called once
+        let line_numbers: Vec<_> = source.char_indices().filter(|&(i, c)| i == 0 || c == '\n').map(|(i, _)| i).collect();
+        let get_line_number = |idx: usize| {
+            match line_numbers.binary_search(&idx) {
+                Ok(idx) => idx + 1,
+                Err(idx) => idx
+            }
+        };
 
         let line_start = source[..=self.start]
             .rfind(|x| x == '\n')
             .map(|i| i + 1) // don't include the newline
             .unwrap_or(0);
 
-        let line_end = source[self.end..]
+        let line_end = source[self.start..]
             .find(|x| x == '\n')
-            .map(|i| i + self.end)
+            .map(|i| i + self.start)
             .unwrap_or(source.len());
 
-        print!("\n\x1b[1F");
-        // Print until "selection", print indication markers (^^^), go back to where you where and print until the end of the line
-        // Necessary to handle multi-width characters like tabs
-        println!("at: {}\x1b[1B{}\x1b[1A\x1b[{}D{}\n",
-            &source[line_start..self.start],
-            "^".repeat(self.end-self.start),
-            self.end-self.start,
-            &source[self.start..line_end]
-        );
+        let cutoff_end = self.end.min(line_end);
+
+        println!("     |");
+        print!("{: >4} | ", get_line_number(line_start));
+        println!("{}", &source[line_start..line_end]);
+        println!("     | {}{}", " ".repeat(self.start - line_start), "^".repeat(cutoff_end - self.start));
     }
 }
 
@@ -57,16 +71,20 @@ pub type Result<T> = std::result::Result<T, CompilerError>;
 
 pub trait ToCompilerError where Self: Sized {
     type Out;
-    fn hydrate(self, start: usize, end: usize) -> Self::Out;
+    fn at(self, start: usize, end: usize) -> Self::Out;
 
     fn at_item(self, item: &token::Item) -> Self::Out {
-        self.hydrate(item.start, item.end)
+        self.at(item.start, item.end)
+    }
+
+    fn at_ast(self, ast: &ast::Ast) -> Self::Out {
+        self.at(ast.start, ast.end)
     }
 }
 
 impl ToCompilerError for AstError {
     type Out = CompilerError;
-    fn hydrate(self, start: usize, end: usize) -> Self::Out {
+    fn at(self, start: usize, end: usize) -> Self::Out {
         CompilerError {
             error: ErrorType::Ast(self),
             start,
@@ -77,7 +95,7 @@ impl ToCompilerError for AstError {
 
 impl ToCompilerError for AnalysisError {
     type Out = CompilerError;
-    fn hydrate(self, start: usize, end: usize) -> Self::Out {
+    fn at(self, start: usize, end: usize) -> Self::Out {
         CompilerError {
             error: ErrorType::Analysis(self),
             start,
@@ -88,7 +106,7 @@ impl ToCompilerError for AnalysisError {
 
 impl ToCompilerError for TypeError {
     type Out = CompilerError;
-    fn hydrate(self, start: usize, end: usize) -> Self::Out {
+    fn at(self, start: usize, end: usize) -> Self::Out {
         CompilerError {
             error: ErrorType::Type(self),
             start,
@@ -99,7 +117,7 @@ impl ToCompilerError for TypeError {
 
 impl<T, E: ToCompilerError<Out = CompilerError>> ToCompilerError for std::result::Result<T, E> {
     type Out = Result<T>;
-    fn hydrate(self, start: usize, end: usize) -> Self::Out {
-        self.map_err(|e| e.hydrate(start, end))
+    fn at(self, start: usize, end: usize) -> Self::Out {
+        self.map_err(|e| e.at(start, end))
     }
 }

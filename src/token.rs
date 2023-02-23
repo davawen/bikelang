@@ -218,12 +218,12 @@ impl Lexer {
         self.tokens.pop().unwrap_or(Item::EOF)
     }
 
-    pub fn expect(&mut self, tok: Token) -> Result<()> {
+    pub fn expect(&mut self, tok: Token) -> Result<Item> {
         let n = self.next();
         if n.token == tok {
-            Ok(())
+            Ok(n)
         } else {
-            Err(AstError::ExpectedToken(tok, n.token)).hydrate(n.start, n.end)
+            Err(AstError::ExpectedToken(tok, n.token)).at(n.start, n.end)
         }
     }
 

@@ -1,6 +1,6 @@
 func main() {
-    i32 a = 10("test");
+    i32 a = 10;
 	u8 b = 12;
-	u64 c = a + b;
+	u64 c = print#("This is an error");
 }
 

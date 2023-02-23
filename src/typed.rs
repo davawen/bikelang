@@ -80,7 +80,7 @@ impl Type {
         match node {
             Node::Identifier( typename, _) => Self::from_str(&typename),
             Node::UnaryExpr { op: UnaryOperation::Deref, value, .. } => Ok(
-                Type::Ptr(box Self::from_node(*value)?)
+                Type::Ptr(box Self::from_node(value.node)?)
             ),
             _ => Err(TypeError::Unknown(format!("{node:?}")))
         }
