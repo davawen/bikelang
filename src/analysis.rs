@@ -1,6 +1,7 @@
-use std::ops::Not;
+use std::{ops::Not, fmt::Display};
 
 use indexmap::IndexMap;
+use itertools::Itertools;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
@@ -78,7 +79,7 @@ impl Function {
                     if !variables.contains_key(name) {
                         variables.insert(name.clone(), typename.clone());
                     } else {
-                        return Err(AnalysisError::Redefinition("variable", name.clone())).at_ast(&ast);
+                        return Err(AnalysisError::Redefinition("variable", name.clone())).at_ast(ast);
                     }
                 }
                 Node::UnaryExpr { value, .. } => {
@@ -382,5 +383,57 @@ impl App {
 
         self.function_definitions = this.function_definitions;
         Ok(self)
+    }
+}
+
+impl Display for App {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const WHITE: &str = "\x1b[0m";
+        const CYAN: &str = "\x1b[36m";
+        const GRAY: &str = "\x1b[90m";
+
+        for (name, func) in &self.function_definitions {
+            writeln!(f, "FUNC {name}")?;
+
+            if func.return_type != Type::Void {
+                writeln!(f, "{GRAY}├ {WHITE}RETURNS -> {CYAN}{:?}", func.return_type)?;
+            }
+            writeln!(f, "{GRAY}├ {WHITE}VARIABLES")?;
+            for (idx, (name, ty)) in func.variables.iter().enumerate() {
+                let is_last = idx == func.variables.len()-1;
+                let connector = if is_last { '╰' } else { '├' };
+
+                let is_argument = if func.arguments.contains(&idx) {
+                    "(ARGUMENT)"
+                } else { "" };
+
+                writeln!(f, "{GRAY}│ {connector} {WHITE}{name} -> {CYAN}{ty:?} {is_argument}")?;
+            }
+            writeln!(f, "{GRAY}╰ {WHITE}BODY")?;
+            let body = self.function_bodies[func.body]
+                .body.iter()
+                .map(|x| format!("{x}"))
+                .collect_vec();
+
+            let body_len = body.len();
+            for (idx, arm) in body.into_iter().enumerate() {
+                let is_last = idx == body_len-1;
+
+                let mut it = arm.split_inclusive('\n');
+                let first = it.next().unwrap();
+
+                let connector = if is_last { '╰' } else { '├' };
+                let separator = if is_last { ' ' } else { '│' };
+
+                write!(f, "  {GRAY}{connector} {WHITE}{first}")?;
+                for line in it {
+                    write!(f, "  {GRAY}{separator} {WHITE}{line}")?;
+                }
+            }
+
+            writeln!(f)?;
+        }
+
+        Ok(())
     }
 }

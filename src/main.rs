@@ -49,7 +49,7 @@ fn compile(args: Args, source: &str) -> error::Result<String> {
                 return Ok(String::new()); 
             }
 
-            println!("{}: {:?}", &source[t.bounds], t.token)
+            println!("{} : {:?}", &source[t.bounds], t.token)
         }
     }
 
@@ -62,7 +62,7 @@ fn compile(args: Args, source: &str) -> error::Result<String> {
     app.insert_declarations(ast)?;
     let app = app.type_check()?;
 
-    if args.analyze { println!("{app:#?}") }
+    if args.analyze { println!("{app}") }
     Ok(String::new())
     //
     // let mut ir = ir::Ir::from_app(app);

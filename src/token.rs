@@ -112,7 +112,7 @@ impl Lexer {
         let mut out = Vec::new();
         let mut start = 0;
 
-        while let Some((idx, c)) = chars.next() {
+        while let Some((mut idx, c)) = chars.next() {
             let token = match c {
                 c if c.is_alphanumeric() || c == '_' => {
                     word.push(c);
@@ -145,6 +145,7 @@ impl Lexer {
                             match chars.peek() {
                                 $(Some((_, $c)) => {
                                     chars.next();
+                                    idx += 1;
                                     $or
                                 })+
                                 _ => $then
