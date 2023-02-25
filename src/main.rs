@@ -4,14 +4,14 @@ use std::fs;
 use clap::Parser;
 
 use crate::{
-    token::Lexer, utility::Inspect, ast::parse_ast, error::ToCompilerError,
+    token::Lexer, ast::parse_ast,
 };
 
 mod utility;
 mod error;
 mod ast;
 mod analysis;
-// mod ir;
+mod ir;
 mod token;
 mod typed;
 
@@ -63,15 +63,14 @@ fn compile(args: Args, source: &str) -> error::Result<String> {
     let app = app.type_check()?;
 
     if args.analyze { println!("{app}") }
-    Ok(String::new())
-    //
-    // let mut ir = ir::Ir::from_app(app);
-    // ir.optimize();
-    //
-    // if args.ir { println!("{ir:#?}") }
-    // if args.asm { println!("{}", ir.generate_asm()) }
-    //
-    // Ok(ir.generate_full())
+
+    let mut ir = ir::Ir::from_app(app);
+    ir.optimize();
+
+    if args.ir { println!("{ir:#?}") }
+    if args.asm { println!("{}", ir.generate_asm()) }
+
+    Ok(ir.generate_full())
 }
 
 fn main() {

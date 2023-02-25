@@ -59,10 +59,10 @@ impl Comparison {
 
 impl Function {
     /// Invariant: app's function_bodies can't be used!
-    fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, func: &analysis::Function, scope: &[Scope], node: ast::Node) -> Value {
-        match node {
-            ast::Node::Expr { op: BinaryOperation::Assignment, ty: _, lhs, rhs } => {
-                let address = match *lhs {
+    fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, func: &analysis::Function, scope: &[Scope], ast: ast::Ast) -> Value {
+        match ast.node {
+            ast::Node::Expr { op: BinaryOperation::Assignment, ty: _, box lhs, box rhs } => {
+                let address = match lhs.node {
                     ast::Node::Identifier(var, _) | ast::Node::Definition { name: var, .. } => {
                         let var = self.named_variables[&var];
                         var.into()
@@ -74,13 +74,13 @@ impl Function {
                     _ => unreachable!("Cannot assign to {lhs:?}"),
                 };
 
-                let rhs = self.fold_node(ir, app, func, scope, *rhs);
+                let rhs = self.fold_node(ir, app, func, scope, rhs);
                 self.instructions.push(Instruction::VariableStore(address, rhs));
 
                 Value::NoValue
             }
-            ast::Node::UnaryExpr { op, ty, value } => {
-                let value = self.fold_node(ir, app, func, scope, *value);
+            ast::Node::UnaryExpr { op, ty, box value } => {
+                let value = self.fold_node(ir, app, func, scope, value);
 
                 let temporary = self.add_temporary(ty.size());
                 use UnaryOperation::*;
@@ -94,9 +94,9 @@ impl Function {
                 self.instructions.push(Instruction::StoreOperation(temporary.into(), op));
                 Value::VariableLoad(temporary)
             }
-            ast::Node::Expr { op, ty, lhs, rhs } => {
-                let lhs = self.fold_node(ir, app, func, scope, *lhs);
-                let rhs = self.fold_node(ir, app, func, scope, *rhs);
+            ast::Node::Expr { op, ty, box lhs, box rhs } => {
+                let lhs = self.fold_node(ir, app, func, scope, lhs);
+                let rhs = self.fold_node(ir, app, func, scope, rhs);
 
                 let temporary = self.add_temporary(ty.size());
 
@@ -141,8 +141,8 @@ impl Function {
             }
             ast::Node::Intrisic(i) => {
                 match i {
-                    ast::Intrisic::Asm(str) => {
-                        let str = self.fold_node(ir, app, func, scope, *str);
+                    ast::Intrisic::Asm(box str) => {
+                        let str = self.fold_node(ir, app, func, scope, str);
                         self.instructions.push(Instruction::Intrisic(Intrisic::Asm(str)));
                     },
                     ast::Intrisic::Print(values) => {
@@ -161,17 +161,17 @@ impl Function {
                 // self.instructions.push(Instruction::Intrisic(Intrisic::from_node(name, parameter_list)?));
                 Value::NoValue
             }
-            ast::Node::If { condition, body } => {
+            ast::Node::If { box condition, box body } => {
                 let idx = self.add_label();
 
-                let jump = match *condition { 
+                let jump = match condition.node { 
                     ast::Node::Expr { op, ty: _, lhs, rhs} if op.is_comparison() => {
                         let lhs = self.fold_node(ir, app, func, scope, *lhs);
                         let rhs = self.fold_node(ir, app, func, scope, *rhs);
                         Comparison::from_op(op, lhs, rhs).inverse() // Skip the function's body if the condition is NOT true
                     } 
                     _ => {
-                        let value = self.fold_node(ir, app, func, scope, *condition);
+                        let value = self.fold_node(ir, app, func, scope, condition);
                         Comparison::NotZero(value).inverse()
                     }
                 };
@@ -179,19 +179,19 @@ impl Function {
                 let scope = &[scope, &[Scope::If { end_label: idx }]].concat();
 
                 self.instructions.push(Instruction::Jump(idx, jump));
-                self.fold_node(ir, app, func, scope, *body);
+                self.fold_node(ir, app, func, scope, body);
                 self.instructions.push(Instruction::Label(idx));
                 
                 Value::NoValue
             }
-            ast::Node::Loop { body } => {
+            ast::Node::Loop { box body } => {
                 let loop_start = self.add_label();
                 let loop_end = self.add_label();
 
                 let scope = &[scope, &[Scope::Loop { start_label: loop_start, end_label: loop_end }]].concat();
 
                 self.instructions.push(Instruction::Label(loop_start));
-                self.fold_node(ir, app, func, scope, *body);
+                self.fold_node(ir, app, func, scope, body);
 
                 self.instructions.push(Instruction::Jump(loop_start, Comparison::Unconditional));
                 self.instructions.push(Instruction::Label(loop_end));
@@ -236,7 +236,7 @@ impl Function {
             ast::Node::Number(n, ty) => Value::Number(n, ty.size()),
             ast::Node::StringLiteral(s) => Value::Literal(ir.push_literal(s)),
             ast::Node::Definition { .. } => Value::NoValue,
-            ast::Node::FuncDef { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {node:#?}"),
+            ast::Node::FuncDef { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {self:#?}"),
         }
     }
 
