@@ -108,8 +108,11 @@ impl Function {
                             reg
                         };
                         match op {
+                            Deref => {
+                                value = Value::Register(reg.kind.with_size(ty.size()));
+                                Arithmetic::Deref(reg, ty.size())
+                            }
                             LogicalNot => Arithmetic::Not(reg),
-                            Deref => Arithmetic::Deref(reg, ty.size()),
                             Negation => Arithmetic::Negate(reg),
                             AddressOf => unreachable!()
                         }

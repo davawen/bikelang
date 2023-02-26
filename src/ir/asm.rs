@@ -345,7 +345,8 @@ impl Function {
             self.last_variable.map_or(0, |v| self.variables[v].total_offset)
         );
 
-        for ins in &self.instructions {
+        for (idx, ins) in self.instructions.iter().enumerate() {
+            out.push_str(&format!("    ; {}\n", idx + 1));
             let ins = ins.generate_asm(ir, self);
             for x in ins.split('\n') {
                 out.push_str("    ");

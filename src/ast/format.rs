@@ -2,24 +2,12 @@ use std::fmt::Display;
 
 use itertools::Itertools;
 
-use crate::typed::Type;
+use crate::{ typed::Type, utility::color::* };
 
 use super::{Ast, Node, Intrisic};
 
 impl Display for Ast {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const WHITE: &str = "\x1b[0m";
-        const RED: &str = "\x1b[31m";
-        const GREEN: &str = "\x1b[32m";
-        const YELLOW: &str = "\x1b[33m";
-        const BLUE: &str = "\x1b[34m";
-        const PINK: &str = "\x1b[35m";
-        const CYAN: &str = "\x1b[36m";
-        const PURPLE: &str = "\x1b[38;5;177m";
-        const ORANGE: &str = "\x1b[38;5;215m";
-        const LIGHT_GRAY: &str = "\x1b[37m";
-        const GRAY: &str = "\x1b[90m";
-
         let (name, inner ) = match &self.node {
             Node::Number(n, ..) => ( format!("{ORANGE}NUMBER {n}"), None ),
             Node::Identifier(name, ..) => ( format!("IDENT {name}"), None ),
