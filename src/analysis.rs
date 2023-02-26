@@ -100,7 +100,7 @@ impl Function {
                 Node::If { body, .. } | Node::Loop { body } | Node::Return(body) => {
                     get_variable_definitions(variables, body)?;
                 }
-                Node::FuncDef { .. } | Node::Break | Node::Intrisic(_) | Node::Identifier(..) | Node::Number(..) | Node::StringLiteral(_) | Node::Empty => ()
+                Node::FuncDef { .. } | Node::Break | Node::Intrisic(_) | Node::Identifier(..) | Node::Number(..) | Node::StringLiteral(_) | Node::BoolLiteral(_) | Node::Empty => ()
             };
             Ok(())
         }
@@ -148,8 +148,9 @@ impl Ast {
                 } else {
                     Err(AnalysisError::NumberTooBig(*value, ty.clone())).at_ast(self)
                 }
-            },
+            }
             Node::StringLiteral(_) => Ok(Type::string().into()),
+            Node::BoolLiteral(_) => Ok(Type::Boolean.into()),
             Node::Identifier(name, typename) => {
                 *typename = definition
                     .variables.get(name).cloned()

@@ -24,6 +24,10 @@ impl Display for Ast {
             Node::Number(n, ..) => ( format!("{ORANGE}NUMBER {n}"), None ),
             Node::Identifier(name, ..) => ( format!("IDENT {name}"), None ),
             Node::StringLiteral(v) => ( format!("{GREEN}LITERAL"), Some(vec![format!("{GREEN}\"{v}\"{WHITE}\n")]) ),
+            Node::BoolLiteral(b) => {
+                let b = if *b { "TRUE" } else { "FALSE" };
+                ( format!("{ORANGE}{b}"), None )
+            }
             Node::Definition { typename, name } => ( format!("DEF {name}: {CYAN}{typename:?}"), None ),
             Node::Break => ( "BREAK".to_string(), None ),
             Node::Empty => ( "EMPTY".to_string(), None ),

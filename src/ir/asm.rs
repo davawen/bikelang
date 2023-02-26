@@ -22,32 +22,11 @@ fn variable_operand(func: &Function, key: VariableKey) -> String {
     )
 }
 
-#[allow(unused)]
-#[derive(Debug, Clone, Copy)]
-enum Register {
-    Rax,
-    Rbx,
-    Rcx,
-    Rdx,
-    Rsi,
-    Rdi,
-    Rbp,
-    Rsp,
-    R8,
-    R9,
-    R10,
-    R11,
-    R12,
-    R13,
-    R14,
-    R15
-}
-
 impl Register {
-    fn as_str(self, size: u32) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         macro_rules! by_size {
             ($v8:literal $v4:literal $v2:literal $v1: literal) => {
-                match size {
+                match self.size {
                     1 => $v1,
                     2 => $v2,
                     4 => $v4,
@@ -57,23 +36,24 @@ impl Register {
             }
         }
 
-        match self {
-            Register::Rax => by_size!("rax" "eax" "ax" "al"),
-            Register::Rbx => by_size!("rbx" "ebx" "bx" "bl"),
-            Register::Rcx => by_size!("rcx" "ecx" "cx" "cl"),
-            Register::Rdx => by_size!("rdx" "edx" "dx" "dl"),
-            Register::Rsi => by_size!("rsi" "esi" "si" "sil"),
-            Register::Rdi => by_size!("rdi" "edi" "di" "dil"),
-            Register::Rbp => by_size!("rbp" "ebp" "bp" "bpl"),
-            Register::Rsp => by_size!("rsp" "esp" "sp" "spl"),
-            Register::R8  => by_size!("r8"  "r8d"  "r8w"  "r8b" ),
-            Register::R9  => by_size!("r9"  "r9d"  "r9w"  "r9b" ),
-            Register::R10 => by_size!("r10" "r10d" "r10w" "r10b"),
-            Register::R11 => by_size!("r11" "r11d" "r11w" "r11b"),
-            Register::R12 => by_size!("r12" "r12d" "r12w" "r12b"),
-            Register::R13 => by_size!("r13" "r13d" "r13w" "r13b"),
-            Register::R14 => by_size!("r14" "r14d" "r14w" "r14b"),
-            Register::R15 => by_size!("r15" "r15d" "r15w" "r15b"),
+        use RegisterKind::*;
+        match self.kind {
+            Rax => by_size!("rax" "eax" "ax" "al"),
+            Rbx => by_size!("rbx" "ebx" "bx" "bl"),
+            Rcx => by_size!("rcx" "ecx" "cx" "cl"),
+            Rdx => by_size!("rdx" "edx" "dx" "dl"),
+            Rsi => by_size!("rsi" "esi" "si" "sil"),
+            Rdi => by_size!("rdi" "edi" "di" "dil"),
+            Rbp => by_size!("rbp" "ebp" "bp" "bpl"),
+            Rsp => by_size!("rsp" "esp" "sp" "spl"),
+            R8  => by_size!("r8"  "r8d"  "r8w"  "r8b" ),
+            R9  => by_size!("r9"  "r9d"  "r9w"  "r9b" ),
+            R10 => by_size!("r10" "r10d" "r10w" "r10b"),
+            R11 => by_size!("r11" "r11d" "r11w" "r11b"),
+            R12 => by_size!("r12" "r12d" "r12w" "r12b"),
+            R13 => by_size!("r13" "r13d" "r13w" "r13b"),
+            R14 => by_size!("r14" "r14d" "r14w" "r14b"),
+            R15 => by_size!("r15" "r15d" "r15w" "r15b"),
         }
     }
 }
@@ -81,12 +61,12 @@ impl Register {
 
 // Addresses use r8 as an intermediary register
 impl Address {
-    fn as_operand(&self, func: &Function) -> (String, String) {
+    fn as_operand(&self, func: &Function) -> String {
         match self {
-            Address::Variable(key) => (String::new(), variable_operand(func, *key)),
+            Address::Variable(key) => variable_operand(func, *key),
             Address::Ptr(v, pointed_size) => {
-                let (r8, move_to) = v.move_to(Register::R8, func);
-                (move_to + "\n", format!("{} [{r8}]", word_size(*pointed_size)))
+                let Value::Register(reg) = v else { unreachable!("Trying to copy value into literal") };
+                format!("{1} [{0}]", reg.as_str(), word_size(*pointed_size))
             }
         }
     }
@@ -96,56 +76,29 @@ impl Value {
     fn as_operand(&self, func: &Function) -> String {
         match self {
             &Value::Number(x, size) => format!("{} {x}", word_size(size)),
-            &Value::VariableLoad(idx) => variable_operand(func, idx),
-            &Value::LastCall { size } => format!("{} [rsp]", word_size(size)),
             &Value::Boolean(x) => if x { "BYTE 1".to_owned() } else { "BYTE 0".to_owned() },
+            &Value::Register(reg) => reg.as_str().to_owned(),
             Value::Literal(idx) => format!("user_str{idx}"),
             Value::NoValue => unreachable!("blegh: {self:#?}")
         }
     }
 
-    fn move_to(&self, reg: Register, func: &Function) -> (&'static str, String) {
-        let reg = reg.as_str(self.size(func));
-        (reg, format!("mov {reg}, {}", self.as_operand(func)))
-    }
-
-    fn is_memory_access(&self) -> bool {
-        match self {
-            Value::Number(..) | Value::Boolean(_) | Value::Literal(_) => false,
-            Value::VariableLoad(_) | Value::LastCall { .. } => true,
-            Value::NoValue => unreachable!("{self:#?}")
-        }
-    }
-
-    fn direct_move_or_pass(&self, destination: String, func: &Function) -> String {
-        if self.is_memory_access() {
-            let (reg, move_to) = self.move_to(Register::Rax, func);
-            format!("{move_to}\nmov {destination}, {reg}\n")
-        } else {
-            format!("mov {destination}, {}\n", self.as_operand(func))
-        }
-    }
-
-    fn size(&self, func: &Function) -> u32 {
-        match self {
-            &Value::Number(_, size) => size,
-            Value::VariableLoad(idx) => func.variables[*idx].size,
-            Value::Boolean(_) => 1,
-            &Value::LastCall { size } => size,
-            Value::NoValue | Value::Literal(_) => todo!("value blegh: {self:#?}")
-        }
-    }
+    // fn direct_move_or_pass(&self, destination: String, func: &Function) -> String {
+    //     if self.is_memory_access() {
+    //         let (reg, move_to) = self.move_to(Register::Rax, func);
+    //         format!("{move_to}\nmov {destination}, {reg}\n")
+    //     } else {
+    //         format!("mov {destination}, {}\n", self.as_operand(func))
+    //     }
+    // }
 }
 
-// Intrisics will put their value into rax
 impl Arithmetic {
     /// Returns the code the intrisic will do and the output register that was used
     fn generate_asm(&self, func: &Function) -> (&'static str, String) {
         use Arithmetic::*;
         match self {
             Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | And(lhs, rhs) | Or(lhs, rhs) | Xor(lhs, rhs) => {
-                let rax = Register::Rax.as_str(lhs.size(func));
-
                 let op = match self {
                     Add(..) => "add",
                     Sub(..) => "sub",
@@ -155,53 +108,63 @@ impl Arithmetic {
                     Xor(..) => "xor",
                     _ => unreachable!()
                 };
-
-                (rax, format!(
-                    "mov {rax}, {}\n{op} {rax}, {}\n",
-                    lhs.as_operand(func),
-                    rhs.as_operand(func)
+                let reg = lhs.as_str();
+                (reg, format!(
+                    "{op} {reg}, {}\n", rhs.as_operand(func)
                 ))
             }
             Div(lhs, rhs) | Modulus(lhs, rhs)  => {
-                let rax = Register::Rax.as_str(lhs.size(func));
-                let r8 = Register::R8.as_str(lhs.size(func));
+                let size = lhs.size;
+
+                let is_rax = matches!(lhs, Register { kind: RegisterKind::Rax, .. });
+
+                let rax = RegisterKind::Rax.with_size(size).as_str();
+                let r8 = RegisterKind::R8.with_size(size).as_str();
+
+                let lhs = lhs.as_str();
 
                 // Signed dived of rdx:rax = make sure rdx is null
-                (rax, format!(
-                    "xor rdx, rdx\nmov {rax}, {}\nmov {r8}, {}\nidiv {r8}{}\n",
-                    lhs.as_operand(func),
-                    rhs.as_operand(func),
-                    if matches!(self, Modulus(..)) { "\nmov rax, rdx" } else { "" }
+                // Save their values to the stack! (could check if they're actually used to remove this step)
+                (rax, fmtools::format!(
+                    if !is_rax {
+                        "push rax\n"
+                        "mov "{rax}", "{lhs}"\n"
+                    }
+                    "push rdx\n"
+                    "push r8\n"
+                    "xor rdx, rdx\n"
+                    "mov "{r8}", "{rhs.as_operand(func)}"\n"
+                    "idiv "{r8}"\n"
+                    if let Modulus(..) = self {
+                        "mov rax, rdx\n"
+                    }
+                    "pop r8\n"
+                    "pop rdx\n"
+                    if !is_rax {
+                        "mov "{lhs}", "{rax}"\n"
+                        "pop rax\n"
+                    }
                 ))
             }
-            Not(v) => {
-                let size = v.size(func);
-                let rax = Register::Rax.as_str(size);
-                (rax, format!(
-                    "mov {rax}, {}\nxor {rax}, 1\n", 
-                    v.as_operand(func)
+            Not(reg) => {
+                let reg = reg.as_str();
+                (reg, format!( "xor {reg}, 1\n" ))
+            }
+            Negate(reg) => {
+                let reg = reg.as_str();
+                (reg, format!( "neg {reg}\n"))
+            }
+            &Deref(reg, out_size) => {
+                let reg_out = reg.kind.with_size(out_size).as_str();
+                let reg = reg.as_str();
+                (reg_out, format!(
+                    "mov {reg_out}, {} [{reg}]\n",
+                    word_size(out_size)
                 ))
             }
-            Negate(v) => {
-                let size = v.size(func);
-                let rax = Register::Rax.as_str(size);
-                (rax, format!(
-                    "mov {rax}, {}\nneg {rax}\n",
-                    v.as_operand(func)
-                ))
-            }
-            Deref(v, size) => {
-                let rax_out = Register::Rax.as_str(*size);
-                (rax_out, format!(
-                    "mov rax, {}\nmov {rax_out}, {} [rax]\n",
-                    v.as_operand(func),
-                    word_size(*size)
-                ))
-            }
-            AddressOf(v) => {
-                let Value::VariableLoad(v) = v else { unreachable!("Trying to take address of r-value") };
-                let rax = Register::Rax.as_str(8);
-                (rax, format!("lea rax, {}\n", variable_operand(func, *v)))
+            &AddressOf(reg, var) => {
+                let reg = reg.as_str();
+                (reg, format!("lea {reg}, {}\n", variable_operand(func, var)))
             }
         }
     }
@@ -210,19 +173,18 @@ impl Arithmetic {
 impl Comparison {
     fn generate_asm(&self, func: &Function) -> String {
         use Comparison::*;
-        let (rax, left, comparison) = match self {
-            Unconditional | Never => return "".to_owned(),
+        match self {
+            Unconditional | Never => "".to_owned(),
             NotZero(v) | Zero(v) => {
-                let rax = Register::Rax.as_str(v.size(func));
-                ( rax, v, format!("test {rax}, {rax}") ) 
+                let v = v.as_operand(func);
+                format!("test {v}, {v}")  
             },
             Eq(l, r) | Neq(l, r) | Gt(l, r) | Ge(l, r) | Lt(l, r) | Le(l, r) => {
-                let rax = Register::Rax.as_str(l.size(func));
-                ( rax, l, format!("cmp {rax}, {}", r.as_operand(func)))
+                let l = l.as_operand(func);
+                let r = r.as_operand(func);
+                format!("cmp {l}, {r}")
             }
-        };
-
-        format!("mov {rax}, {}\n{comparison}", left.as_operand(func))
+        }
     }
 
     fn as_store(&self) -> &'static str {
@@ -265,32 +227,39 @@ impl Intrisic {
                 ir.literals[*inner].clone()
             }
             PrintNumber(v, ty) => {
-                let rax = Register::Rax.as_str(v.size(func));
-                let mut out = format!("mov {rax}, {}\n", v.as_operand(func));
+                let is_rax = matches!(v, Value::Register(Register{ kind: RegisterKind::Rax, .. }));
+                fmtools::format!(
+                    // If given value is not rax, need to save and restore its value
+                    if !is_rax {
+                        let rax = RegisterKind::Rax.with_size(v.size()).as_str();
+                        "push rax\n" // save value of rax
+                        "mov "{rax}", "{v.as_operand(func)}"\n"
+                    }
 
-                if typed::SuperType::Signed.verify(ty) {
-                    let size = ty.size();
-                    if size == 1 { out += "cbw\n" }
-                    if size <= 2 { out += "cwde\n" }
-                    if size <= 4 { out += "cdqe\n" }
+                    // Extend size of rax if it's signed
+                    if typed::SuperType::Signed.verify(ty) {
+                        let size = ty.size();
+                        if size == 1 { "cbw\n" }
+                        if size <= 2 { "cwde\n" }
+                        if size <= 4 { "cdqe\n" }
 
-                    out += "call __builtin_print_number_signed\n";
-                } else {
-                    out += "call __builtin_print_number_unsigned\n";
-                }
-                out
+                        "call __builtin_print_number_signed\n"
+                    } else {
+                        "call __builtin_print_number_unsigned\n"
+                    }
+                    if !is_rax {
+                        "pop rax\n" // get back value of rax
+                    }
+                )
             },
             PrintString(Value::Literal(idx)) => {
                 let literal = &ir.literals[*idx];
-                format!("
-mov rax, 1
-mov rdi, 1
-mov rsi, user_str{}
-mov rdx, {}
-syscall
-                    ",
-                    idx,
-                    literal.len()
+                fmtools::format!(
+                    "mov rax, 1\n"
+                    "mov rdi, 1\n"
+                    "mov rsi, user_str"{idx}"\n"
+                    "mov rdx, "{literal.len()}"\n"
+                    "syscall\n"
                 )
             }
             _ => todo!("Intrisics not all set lol: {self:#?}")
@@ -302,19 +271,29 @@ impl Instruction {
     fn generate_asm(&self, ir: &Ir, func: &Function) -> String {
         match self {
             Instruction::VariableStore(var, value) => {
-                let (load_var, operand) = var.as_operand(func);
-                format!("{load_var}{}", value.direct_move_or_pass(operand, func))
+                // No memory access in values = no problems c:
+                format!("mov {}, {}", var.as_operand(func), value.as_operand(func))
             }
-            Instruction::StoreOperation(var, op) => {
-                let (reg, code) = op.generate_asm(func);
-                let (load_var, operand) = var.as_operand(func);
-                format!("{code}{load_var}mov {operand}, {reg}\n")
+            Instruction::VariableLoad(reg, var) => {
+                format!("mov {}, {}", reg.as_str(), var.as_operand(func))
+            }
+            Instruction::Load(reg, value) => {
+                format!("mov {}, {}", reg.as_str(), value.as_operand(func))
+            }
+            Instruction::Save(reg) => {
+                format!("sub rsp, {}\nmov {} [rsp], {}", reg.size, word_size(reg.size), reg.as_str())
+            }
+            Instruction::Restore(reg) => {
+                format!("mov {}, {} [rsp]\n add rsp, {}", reg.as_str(), word_size(reg.size), reg.size)
+            }
+            Instruction::StoreOperation(op) => {
+                op.generate_asm(func).1
             }
             Instruction::StoreComparison(var, comp) => {
                 let comparison = comp.generate_asm(func);
                 let store = comp.as_store();
-                let (load_var, operand) = var.as_operand(func);
-                format!("{comparison}\n{load_var}{store} {operand}\n", )
+                let var = var.as_str();
+                format!("{comparison}\n{store} {var}\n")
             }
             Instruction::Label(label_idx) => {
                 format!(".label{label_idx}:")
@@ -328,14 +307,24 @@ impl Instruction {
                 i.generate_asm(ir, func)
             }
             Instruction::Call { func: func_idx, parameters, return_type } => {
-                format! {
-                    "{}{}\ncall {}\nadd rsp, {}",
-                    if return_type.size() > 0 { format!("sub rsp, {}\n", return_type.size()) } else { "".to_owned() },
-                    parameters.iter().rev().map(|p| {
-                        format!("sub rsp, {}\n{}", p.size(func), p.direct_move_or_pass("[rsp]".to_owned(), func))
-                    }).join("\n"),
-                    ir.functions[*func_idx].name,
-                    parameters.iter().map(|p| p.size(func)).sum::<u32>()
+                let param_size = parameters.iter().map(Value::size).sum::<u32>();
+                let return_size = return_type.size();
+
+                let mut offset = param_size;
+                let offsets = parameters.iter().map(|v| {
+                    offset -= v.size();
+                    offset
+                }).collect_vec();
+
+                fmtools::format! {
+                    "sub rsp, "{param_size + return_size}"\n"
+                    for (p, offset) in parameters.iter().zip(&offsets) {
+                        let size = p.size();
+                        "mov "{word_size(size)}" [rsp + "{offset}"], "
+                        {p.as_operand(func)}"\n"
+                    }
+                    "call "{ir.functions[*func_idx].name}"\n"
+                    "add rsp, "{param_size}"\n"
                 }
             }
             Instruction::Ret => "mov rsp, rbp\npop rbp\nret\n".to_owned()

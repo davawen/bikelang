@@ -1,9 +1,11 @@
+use itertools::Itertools;
+
 use crate::{ast::{self, BinaryOperation, UnaryOperation}, analysis, utility::PushIndex, typed::{Type, SuperType}};
 
 use super::*;
 
 impl Arithmetic {
-    fn from_op(op: BinaryOperation, lhs: Value, rhs: Value) -> Self {
+    fn from_op(op: BinaryOperation, lhs: Register, rhs: Value) -> Self {
         macro_rules! map {
             ($($l:ident => $r:ident),+) => {
                 match op {
@@ -75,69 +77,119 @@ impl Function {
                 };
 
                 let rhs = self.fold_node(ir, app, func, scope, rhs);
+
+                address.free_register(ir);
+                rhs.free_register(ir);
+
                 self.instructions.push(Instruction::VariableStore(address, rhs));
 
                 Value::NoValue
             }
-            ast::Node::UnaryExpr { op, ty, box value } => {
-                let value = self.fold_node(ir, app, func, scope, value);
+            ast::Node::UnaryExpr { op, ty, value: box inner } => {
+                let mut value;
 
-                let temporary = self.add_temporary(ty.size());
                 use UnaryOperation::*;
                 let op = match op {
-                    LogicalNot => Arithmetic::Not(value),
-                    Deref => Arithmetic::Deref(value, ty.size()),
-                    AddressOf => Arithmetic::AddressOf(value),
-                    Negation => Arithmetic::Negate(value)
+                    AddressOf => {
+                        let ast::Node::Identifier(name, ty) = inner.node 
+                            else { unreachable!("Trying to take address of literal") };
+                        let reg = Register::get(ir, 8);
+                        value = Value::Register(reg);
+                        Arithmetic::AddressOf(reg, self.named_variables[&name])
+                    },
+                    op => {
+                        value = self.fold_node(ir, app, func, scope, inner);
+                        let reg = if let Value::Register(reg) = value {
+                            reg
+                        } else  {
+                            let reg = Register::get(ir, value.size());
+                            self.instructions.push(Instruction::Load(reg, value));
+                            value = Value::Register(reg);
+                            reg
+                        };
+                        match op {
+                            LogicalNot => Arithmetic::Not(reg),
+                            Deref => Arithmetic::Deref(reg, ty.size()),
+                            Negation => Arithmetic::Negate(reg),
+                            AddressOf => unreachable!()
+                        }
+                    }
                 };
 
-                self.instructions.push(Instruction::StoreOperation(temporary.into(), op));
-                Value::VariableLoad(temporary)
+                self.instructions.push(Instruction::StoreOperation(op));
+                value
             }
             ast::Node::Expr { op, ty, box lhs, box rhs } => {
                 let lhs = self.fold_node(ir, app, func, scope, lhs);
                 let rhs = self.fold_node(ir, app, func, scope, rhs);
 
-                let temporary = self.add_temporary(ty.size());
+                let (out, ins) = match op {
+                    op if op.is_arithmetic() || op.is_logic() => {
+                        let reg = match lhs {
+                            Value::Register(reg) => reg,
+                            _ => {
+                                let reg = Register::get(ir, ty.size());
+                                self.instructions.push(Instruction::Load(reg, lhs));
+                                reg
+                            }
+                        };
+                        // result of operation is stored in register to the left
 
-                let ins = match op {
-                    op if op.is_arithmetic() => {
-                        Instruction::StoreOperation(temporary.into(), Arithmetic::from_op(op, lhs, rhs))
-                    }
-                    op if op.is_logic() => {
-                        Instruction::StoreOperation(temporary.into(), Arithmetic::from_op(op, lhs, rhs))
+                        (reg, Instruction::StoreOperation(Arithmetic::from_op(op, reg, rhs)))
                     }
                     op if op.is_comparison() => {
-                        Instruction::StoreComparison(temporary.into(), Comparison::from_op(op, lhs, rhs))
+                        let reg = Register::get(ir, ty.size());
+                        lhs.free_register(ir); // result of comparison is stored in new register
+                        (reg, Instruction::StoreComparison(reg, Comparison::from_op(op, lhs, rhs)))
                     }
                     _ => unreachable!()
                 };
+                rhs.free_register(ir);
                 
                 self.instructions.push(ins);
-                Value::VariableLoad(temporary)
+                Value::Register(out)
             }
             ast::Node::Call { name, parameter_list, return_type } => {
                 let idx = app.function_definitions.get_index_of(&name).unwrap();
 
                 let return_size = return_type.size();
+                let parameters: Vec<_> = parameter_list.into_iter().map(|n| self.fold_node(ir, app, func, scope, n)).collect();
+                for p in &parameters {
+                    p.free_register(ir);
+                }
+
+                // Save used registers
+                for reg in ir.registers_in_use() {
+                    self.instructions.push(Instruction::Save(reg.with_size(8)));
+                }
+
                 let call = Instruction::Call {
                     func: idx,
                     return_type,
-                    parameters: parameter_list.into_iter().map(|n| self.fold_node(ir, app, func, scope, n)).collect()
+                    parameters
                 };
                 self.instructions.push(call);
 
-                if return_size > 0 {
-                    let temporary = self.add_temporary(return_size);
-                    self.instructions.push(
-                        Instruction::VariableStore(temporary.into(), Value::LastCall { size: return_size })
-                    );
+                // Restore used registers
+                let mut restore = ir.registers_in_use().rev().map( |reg| {
+                    Instruction::Restore(reg.with_size(8))
+                }).collect_vec();
 
-                    Value::VariableLoad(temporary)
+                // Get return value 
+                let out = if return_size > 0 {
+                    let reg = Register::get(ir, return_size);
+                    // It's at the top of the stack
+                    self.instructions.push(Instruction::Restore(reg));
+
+                    Value::Register(reg)
                 }
                 else {
                     Value::NoValue
-                }
+                };
+
+                self.instructions.append(&mut restore);
+
+                out
             }
             ast::Node::Intrisic(i) => {
                 match i {
@@ -150,7 +202,11 @@ impl Function {
                             // Desugar print intrisic
                             let print = match node.get_type().clone() {
                                 Type::Ptr(box Type::UInt8) => Intrisic::PrintString(self.fold_node(ir, app, func, scope, node)),
-                                ty if SuperType::Integer.verify(&ty) => Intrisic::PrintNumber(self.fold_node(ir, app, func, scope, node), ty),
+                                ty if SuperType::Integer.verify(&ty) => {
+                                    let num = self.fold_node(ir, app, func, scope, node);
+                                    num.free_register(ir);
+                                    Intrisic::PrintNumber(num, ty)
+                                }
                                 _ => unreachable!()
                             };
 
@@ -168,10 +224,18 @@ impl Function {
                     ast::Node::Expr { op, ty: _, lhs, rhs} if op.is_comparison() => {
                         let lhs = self.fold_node(ir, app, func, scope, *lhs);
                         let rhs = self.fold_node(ir, app, func, scope, *rhs);
+
+                        // Allow using registers after this instruction
+                        // Note: this is fine because the comparison is pushed right after
+                        lhs.free_register(ir);
+                        rhs.free_register(ir);
+
                         Comparison::from_op(op, lhs, rhs).inverse() // Skip the function's body if the condition is NOT true
                     } 
                     _ => {
                         let value = self.fold_node(ir, app, func, scope, condition);
+                        value.free_register(ir);
+
                         Comparison::NotZero(value).inverse()
                     }
                 };
@@ -179,7 +243,8 @@ impl Function {
                 let scope = &[scope, &[Scope::If { end_label: idx }]].concat();
 
                 self.instructions.push(Instruction::Jump(idx, jump));
-                self.fold_node(ir, app, func, scope, body);
+
+                self.fold_node(ir, app, func, scope, body).free_register(ir);
                 self.instructions.push(Instruction::Label(idx));
                 
                 Value::NoValue
@@ -191,7 +256,7 @@ impl Function {
                 let scope = &[scope, &[Scope::Loop { start_label: loop_start, end_label: loop_end }]].concat();
 
                 self.instructions.push(Instruction::Label(loop_start));
-                self.fold_node(ir, app, func, scope, body);
+                self.fold_node(ir, app, func, scope, body).free_register(ir);
 
                 self.instructions.push(Instruction::Jump(loop_start, Comparison::Unconditional));
                 self.instructions.push(Instruction::Label(loop_end));
@@ -200,7 +265,7 @@ impl Function {
             }
             ast::Node::Break => {
                 let Some(Scope::Loop { end_label, .. }) = scope.iter().rfind(|s| matches!(s, Scope::Loop { .. }))
-                    else { unreachable!() };
+                    else { unreachable!("Break called outside of a loop") };
 
                 self.instructions.push(Instruction::Jump(*end_label, Comparison::Unconditional));
 
@@ -208,7 +273,10 @@ impl Function {
             }
             ast::Node::Return(inner) => {
                 let inner = self.fold_node(ir, app, func, scope, *inner);
-                self.instructions.push(Instruction::VariableStore(self.return_variable.unwrap().into(), inner));
+                inner.free_register(ir);
+                if let Some(return_variable) = self.return_variable {
+                    self.instructions.push(Instruction::VariableStore(return_variable.into(), inner));
+                }
                 self.instructions.push(Instruction::Ret);
 
                 Value::NoValue
@@ -221,21 +289,26 @@ impl Function {
                         return self.fold_node(ir, app, func, scope, node);
                     }
                     else {
-                        self.fold_node(ir, app, func, scope, node);
+                        self.fold_node(ir, app, func, scope, node).free_register(ir);
                     }
                 }
 
                 Value::NoValue
             }
             ast::Node::Statement(inner) => {
-                self.fold_node(ir, app, func, scope, *inner);
+                self.fold_node(ir, app, func, scope, *inner).free_register(ir);
                 Value::NoValue
             }
-            ast::Node::Empty => Value::NoValue,
-            ast::Node::Identifier(var, _) => Value::VariableLoad(self.named_variables[&var]),
+            ast::Node::Identifier(name, ty) => {
+                let reg = Register::get(ir, ty.size());
+                self.instructions.push(Instruction::VariableLoad(reg, self.named_variables[&name].into()));
+                Value::Register(reg)
+            }
             ast::Node::Number(n, ty) => Value::Number(n, ty.size()),
             ast::Node::StringLiteral(s) => Value::Literal(ir.push_literal(s)),
+            ast::Node::BoolLiteral(b) => Value::Boolean(b),
             ast::Node::Definition { .. } => Value::NoValue,
+            ast::Node::Empty => Value::NoValue,
             ast::Node::FuncDef { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {self:#?}"),
         }
     }
@@ -255,6 +328,11 @@ impl Function {
         let idx = self.label_num;
         self.label_num += 1;
         idx
+    }
+
+    fn get_var(&self, name: &str) -> (VariableKey, VariableOffset) {
+        let var = self.named_variables[name];
+        ( var, self.variables[var] )
     }
 
     fn new(name: String, definition: &analysis::Function) -> Self {
@@ -304,7 +382,8 @@ impl Ir {
     pub fn from_app(mut app: analysis::App) -> Self {
         let mut this = Self {
             functions: Vec::new(),
-            literals: Vec::new()
+            literals: Vec::new(),
+            used_registers: EnumMap::default()
         };
 
         let bodies = app.function_bodies;
@@ -323,5 +402,49 @@ impl Ir {
 
     pub fn push_literal(&mut self, value: String) -> LiteralIndex {
         self.literals.push_idx(value)
+    }
+
+    /// Returns all registers currently in use
+    pub fn registers_in_use(&mut self) -> impl DoubleEndedIterator<Item = RegisterKind> + '_ {
+        self.used_registers.iter_mut().filter(|(_, x)| **x).map(|(x, _)| x)
+    }
+}
+
+impl Register {
+    fn get(ir: &mut Ir, size: u32) -> Self {
+        let (kind, used) = ir.used_registers.iter_mut()
+            .find(|(r, used)| r.is_usable() && !**used)
+            .expect("Couldn't find an unused register");
+
+        *used = true;
+        Self { kind, size }
+    }
+
+    fn free_register(self, ir: &mut Ir) {
+        ir.used_registers[self.kind] = false;
+    }
+}
+
+impl RegisterKind {
+    fn is_usable(&self) -> bool {
+        use RegisterKind::*;
+        matches!(self, Rax | Rcx | Rdx | R8 | R9 | R10 | R11)
+    }
+}
+
+impl Value {
+    /// Frees the register in value if it is one
+    fn free_register(&self, ir: &mut Ir) {
+        if let Value::Register(reg) = self {
+            reg.free_register(ir);
+        }
+    }
+}
+
+impl Address {
+    fn free_register(&self, ir: &mut Ir) {
+        if let Address::Ptr(v, _) = self {
+            v.free_register(ir);
+        }
     }
 }

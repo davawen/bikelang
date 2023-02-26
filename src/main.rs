@@ -1,4 +1,4 @@
-#![feature(box_syntax, box_patterns)]
+#![feature(box_syntax, box_patterns, if_let_guard)]
 
 use std::fs;
 use clap::Parser;
@@ -65,9 +65,9 @@ fn compile(args: Args, source: &str) -> error::Result<String> {
     if args.analyze { println!("{app}") }
 
     let mut ir = ir::Ir::from_app(app);
-    ir.optimize();
+    // ir.optimize();
 
-    if args.ir { println!("{ir:#?}") }
+    if args.ir { println!("{ir}") }
     if args.asm { println!("{}", ir.generate_asm()) }
 
     Ok(ir.generate_full())

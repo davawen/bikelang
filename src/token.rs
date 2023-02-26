@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::{ast::AstError, error::{Result, ToCompilerError}, utility::Bounds};
 
 #[derive(Debug, Clone)]
@@ -42,7 +44,27 @@ pub enum Keyword {
     If,
     Loop,
     Break,
-    Return
+    Return,
+    True,
+    False
+}
+
+impl FromStr for Keyword {
+    type Err = ();
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let k = match s {
+            "func" => Keyword::Func,
+            "if" => Keyword::If,
+            "loop" => Keyword::Loop,
+            "break" => Keyword::Break,
+            "return" => Keyword::Return,
+            "true" => Keyword::True,
+            "false" => Keyword::False,
+            _ => return Err(())
+        };
+
+        Ok(k)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,16 +143,15 @@ impl Lexer {
                 _ => {
                     let word_token = match word.as_str() {
                         "" => None,
-                        "func" => Some(Keyword::Func.into()),
-                        "if" => Some(Keyword::If.into()),
-                        "loop" => Some(Keyword::Loop.into()),
-                        "break" => Some(Keyword::Break.into()),
-                        "return" => Some(Keyword::Return.into()),
+                        _ if let Ok(key) = word.parse::<Keyword>() => {
+                            Some(key.into())
+                        }
                         _ => match word.parse::<i64>() {
                             Ok(num) => Some(Token::Number(num)),
                             Err(_) => Some(Token::Word(word)),
                         },
                     };
+
                     if let Some(token) = word_token {
                         out.push(Item {
                             token,

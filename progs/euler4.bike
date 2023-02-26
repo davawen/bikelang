@@ -1,3 +1,33 @@
+func is_palindrome(i32 num) -> bool {
+	i32 copy = num;
+	i32 reversed = 0;
+
+	loop {
+		if copy == 0 { break };
+
+		i32 remainder = copy % 10;
+
+		reversed = reversed * 10;
+		reversed = reversed + remainder;
+
+		copy = copy / 10;
+	};
+
+	copy = num;
+	loop {
+		if copy == 0 { break };
+
+		if copy % 10 != reversed % 10 {
+			return false;
+		};
+
+		copy = copy / 10;
+		reversed = reversed / 10;
+	};
+
+	return true;
+}
+
 func main() -> void {
     i32 factor1 = 100;
     i32 largest = 0;
@@ -11,36 +41,7 @@ func main() -> void {
 
             i32 num = factor1 * factor2;
             if num > largest {
-                i32 copy = num;
-                i32 reversed = 0;
-
-                loop {
-                    if copy == 0 { break };
-
-                    i32 remainder = copy % 10;
-
-                    reversed = reversed * 10;
-                    reversed = reversed + remainder;
-
-                    copy = copy / 10;
-                };
-
-                bool is_palindrome = 1 == 1;
-
-                copy = num;
-                loop {
-                    if copy == 0 { break };
-
-                    if copy % 10 != reversed % 10 {
-                        is_palindrome = 0 == 1;
-                        break;
-                    };
-
-                    copy = copy / 10;
-                    reversed = reversed / 10;
-                };
-
-                if is_palindrome {
+                if is_palindrome(num) {
                     print#(num, " is a palindrome!\n");
                     largest = num;
                 };

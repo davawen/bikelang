@@ -1,5 +1,7 @@
 func fibonacci(i32 value) -> i32 {
-	if value <= 1 { return 1 };
+	if value <= 1 { return value };
+
+	//print#("( fibo(", value, " - 1) = ", one, " ) + ( fibo(", value, " - 2) = ", two, " ) = ", one + two, "\n");
 
 	return fibonacci(value - 1) + fibonacci(value - 2);
 }
@@ -18,6 +20,7 @@ func main() -> void {
 		if num > 4000000 { break };
 
 		if is_even(num) {
+			print#("Num is even: ", num, "\n");
 			sum = sum + num;
 		};
 

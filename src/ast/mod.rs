@@ -49,6 +49,7 @@ pub enum Node {
     Block(Vec<Ast>, Type),
     Number(i64, Type),
     StringLiteral(String),
+    BoolLiteral(bool),
     Identifier(String, Type),
     Definition {
         typename: Type,
@@ -251,6 +252,8 @@ impl Item {
                         let expr = box expression(lexer, 0)?;
                         Ast::new(self.bounds.with_end_of(expr.bounds), Node::Return(expr))
                     }
+                    True => Ast::new(self.bounds, Node::BoolLiteral(true)),
+                    False => Ast::new(self.bounds, Node::BoolLiteral(false))
                 }
             }
             Paren(Dir::Left) => { // parenthesis for grouping operations

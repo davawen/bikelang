@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.1.6", features = ["derive"] }
 derive_more = "0.99.17"
+enum-map = "2.4.2"
+fmtools = "0.1.2"
 indexmap = "1.9.2"
 itertools = "0.10.5"
 slotmap = "1.0.6"

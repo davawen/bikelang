@@ -14,6 +14,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "derive_more",
+ "enum-map",
+ "fmtools",
  "indexmap",
  "itertools",
  "slotmap",
@@ -95,6 +97,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90e5c1c8368803113bf0c9584fc495a58b86dc8a29edbf8fe877d21d9507e797"
 
 [[package]]
+name = "enum-map"
+version = "2.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50c25992259941eb7e57b936157961b217a4fc8597829ddef0596d6c3cd86e1a"
+dependencies = [
+ "enum-map-derive",
+]
+
+[[package]]
+name = "enum-map-derive"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a4da76b3b6116d758c7ba93f7ec6a35d2e2cf24feda76c6e38a375f4d5c59f2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "errno"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -114,6 +136,12 @@ dependencies = [
  "cc",
  "libc",
 ]
+
+[[package]]
+name = "fmtools"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f983ed6d4eec47f6b970d69908ceff3ce37a3a9699194ee130fc3e223a351d1a"
 
 [[package]]
 name = "hashbrown"

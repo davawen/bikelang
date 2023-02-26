@@ -20,7 +20,7 @@ func main() {
 		if idx >= 6 { break };
 
 		*(ptr + idx) = *(ptr + idx) + 1;
-		
+
 		putc(*(ptr + idx));
 
 		idx = idx + 1;

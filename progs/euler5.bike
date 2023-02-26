@@ -2,13 +2,13 @@ func main() -> void {
 	i32 num = 1;
 	loop {
 		i32 check = 1;
-		bool cond = 1 == 1;
+		bool cond = true;
 
 		loop {
 			if check > 20 { break };
 			
 			if num % check != 0 {
-				cond = 0 == 1;
+				cond = false;
 				break;
 			};
 
