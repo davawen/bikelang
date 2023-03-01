@@ -1,8 +1,8 @@
 func is_prime(i32 n) -> bool {
 	i32 idx = 2;
 	loop {
-		if n % idx == 0 { return 0 == 1 };
-		if idx >= n/2 { return 1 == 1 };
+		if n % idx == 0 { return false };
+		if idx >= n/2 { return true };
 
 		idx = idx + 1;
 	};

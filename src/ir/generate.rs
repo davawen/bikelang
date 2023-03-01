@@ -141,6 +141,15 @@ impl Function {
                         (reg, Instruction::StoreOperation(Arithmetic::from_op(op, reg, rhs)))
                     }
                     op if op.is_comparison() => {
+                        // Check if we're comparing constants (not authorized x:)
+                        let lhs =  if let (Value::Number(..) | Value::Boolean(_), Value::Number(..) | Value::Boolean(_)) = (lhs, rhs) {
+                            let reg = Register::get(ir, lhs.size());
+                            self.instructions.push(Instruction::Load(reg, lhs));
+                            Value::Register(reg)
+                        } else {
+                            lhs
+                        };
+
                         let reg = Register::get(ir, ty.size());
                         lhs.free_register(ir); // result of comparison is stored in new register
                         (reg, Instruction::StoreComparison(reg, Comparison::from_op(op, lhs, rhs)))
@@ -408,7 +417,7 @@ impl Ir {
     }
 
     /// Returns all registers currently in use
-    pub fn registers_in_use(&mut self) -> impl DoubleEndedIterator<Item = RegisterKind> + '_ {
+    fn registers_in_use(&mut self) -> impl DoubleEndedIterator<Item = RegisterKind> + '_ {
         self.used_registers.iter_mut().filter(|(_, x)| **x).map(|(x, _)| x)
     }
 }

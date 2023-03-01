@@ -16,7 +16,7 @@ fn format_variable(var: VariableKey, variable_names: &HashMap<VariableKey, Strin
 impl Address {
     fn format(&self, variable_names: &HashMap<VariableKey, String>) -> String {
         match self {
-            Address::Ptr(ptr, size) => format!("*({ptr} $ {CYAN}{size} bytes{WHITE})"),
+            Address::Ptr(ptr, size) => format!("(*{ptr} $ {CYAN}{size} bytes{WHITE})"),
             Address::Variable(var) => format_variable(*var, variable_names)
         }
     }
@@ -114,7 +114,7 @@ impl Instruction {
                     {PURPLE}"IF"{WHITE}" "{comp}
                 }
             ),
-            Intrisic(i) => format!("{PINK}INTRISIC {i}{WHITE}"),
+            Intrisic(i) => format!("{PINK}INTRISIC{WHITE} {i}"),
             Call { func, parameters, return_type: _ } => fmtools::format!(
                 {BLUE}"CALL "{functions[*func].name}{WHITE}" WITH "
                 for p in parameters {
@@ -156,6 +156,10 @@ impl Display for Ir {
                 for (idx, ins) in func.instructions.iter().enumerate() {
                     "  "{idx + 1: >3}" | "{ins.format(&self.functions, &variables_names)}"\n"
                 }
+            }
+            "LITERALS:\n"
+            for (idx, literal) in self.literals.iter().enumerate() {
+                "  literal "{idx}": "{GREEN}{literal:?}{WHITE}"\n"
             }
         )?;
 

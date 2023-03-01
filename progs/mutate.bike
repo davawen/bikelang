@@ -1,0 +1,11 @@
+func mutate(*i32 val) {
+	*val = *val + 1;
+}
+
+func main() {
+	i32 i = 10;
+
+	print#("i: ", i, ", i+1 = ");
+	mutate(&i);
+	print#(i, "\n");
+}
