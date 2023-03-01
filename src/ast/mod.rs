@@ -45,6 +45,8 @@ pub enum Node {
     Return(Box<Ast>),
     Intrisic(Intrisic),
     Statement(Box<Ast>),
+    /// Converts it's expression to another type
+    Convert(Box<Ast>, Type), 
     Empty,
     Block(Vec<Ast>, Type),
     Number(i64, Type),
@@ -168,7 +170,7 @@ impl Item {
             Hash => 70,
             Word(_) => 5, 
             Brace(Dir::Left) => 1, // allow stopping at opening brace
-            Paren(Dir::Right) | Brace(Dir::Right) | Keyword(_) | Comma | Semicolon | Eof => 0,
+            Paren(Dir::Right) | Brace(Dir::Right) | Keyword(_) | Comma | Semicolon | Pipe | Eof => 0,
             _ => unreachable!("{self:#?}")
         };
         Ok(out)
@@ -197,6 +199,17 @@ impl Item {
                         ty: Type::Void,
                         value
                     }
+                )
+            }
+            Pipe => {
+                let convert_to = Type::from_node(expression(lexer, 0)?.node).unwrap();
+                lexer.expect(Token::Pipe)?;
+
+                let operand = box expression(lexer, 60)?;
+
+                Ast::new(
+                    self.bounds.with_end_of(operand.bounds),
+                    Node::Convert(operand, convert_to)
                 )
             }
             Keyword(keyword) => {

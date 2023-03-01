@@ -14,7 +14,6 @@ mod analysis;
 mod ir;
 mod token;
 mod typed;
-mod test;
 
 #[derive(Parser)]
 struct Args {

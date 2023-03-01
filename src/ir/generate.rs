@@ -321,7 +321,7 @@ impl Function {
             ast::Node::BoolLiteral(b) => Value::Boolean(b),
             ast::Node::Definition { .. } => Value::NoValue,
             ast::Node::Empty => Value::NoValue,
-            ast::Node::FuncDef { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {self:#?}"),
+            ast::Node::FuncDef { .. } | ast::Node::Convert(..) => unreachable!("this ast node shouldn't be given to ir generation, got: {self:#?}"),
         }
     }
 

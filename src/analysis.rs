@@ -89,8 +89,8 @@ impl Function {
                     get_variable_definitions(variables, lhs)?;
                     get_variable_definitions(variables, rhs)?;
                 }
-                Node::Statement(x) => {
-                    get_variable_definitions(variables, x)?;
+                Node::Statement(box expr) | Node::Convert(box expr, _) => {
+                    get_variable_definitions(variables, expr)?;
                 }
                 Node::Block(body, _) | Node::Call { parameter_list: body, .. } => {
                     for expr in body {
@@ -213,7 +213,7 @@ impl Ast {
                         value => value.expect(SuperType::Ptr, "dereference takes a pointer").transmit()
                     }
                     AddressOf => match value.has_address {
-                        true => Ok(Type::ptr(value.ty).into()),
+                        true => Ok(value.ty.into_ptr().into()),
                         false => Err(TypeError::InvalidOperation("can't take address of r-value", value.ty))
                     }
                 }.at(self.bounds)?;
@@ -245,12 +245,15 @@ impl Ast {
                         left.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers").at_ast(lhs)?;
                         right.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers").at_ast(rhs)?;
 
+                        if left.ty.size() != right.ty.size() {
+                            return Err(TypeError::MismatchedSize("cannot operate on operands of different sizes", left.ty, right.ty).at_ast(self));
+                        }
+
                         let ptr = SuperType::Ptr;
 
                         if ptr.verify(&left.ty) { left }
                         else if ptr.verify(&right.ty) { right }
-                        else if left.ty.size() > right.ty.size() { left }
-                        else { right }
+                        else { left }
                         
                     }
                     Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => {
@@ -272,6 +275,15 @@ impl Ast {
                 *ty = descriptor.ty.clone();
 
                 Ok(descriptor)
+            }
+            Node::Convert(box expr, ty) => {
+                let expr_type = expr.set_type(app, definition, Some(ty))?;
+
+                let output = ty.clone(); // Weird ownership shit?
+
+                expr_type.ty.is_convertible_to(ty).at_ast(self)?;
+
+                Ok(output.into())
             }
             Node::If { box condition, box body } => {
                 let cond_type = condition.set_type(app, definition, None)?;

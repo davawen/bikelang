@@ -19,6 +19,7 @@ impl Display for Ast {
             Node::Definition { typename, name } => ( format!("DEF {name}: {CYAN}{typename:?}"), None ),
             Node::Break => ( "BREAK".to_string(), None ),
             Node::Empty => ( "EMPTY".to_string(), None ),
+            Node::Convert(box expr, ty) => ( format!("CONVERT TO {ty:?}"), Some(vec![format!("{expr}")]) ),
             Node::Return(box expr, ..) => ( format!("{PURPLE}RETURN"), Some(vec![format!("{expr}")]) ),
             Node::Statement(inner) => {
                 ( "STATEMENT".to_string(), Some(vec![format!("{inner}")]) )

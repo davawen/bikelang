@@ -21,7 +21,7 @@ pub enum Type {
 #[derive(Debug, Clone)]
 pub struct TypeDescriptor {
     pub ty: Type,
-    pub has_address: bool
+    pub has_address: bool,
 }
 
 impl PartialEq for TypeDescriptor {
@@ -37,8 +37,10 @@ pub enum TypeError {
     Unknown(String),
     #[error("Expected type {1:?}, got {2:?}: {0}")]
     Mismatched(&'static str, SuperType, Type),
+    #[error("Mismatched size between {1:?}({} bytea) and {2:?}({} bytes): {0}", .1.size(), .2.size())]
+    MismatchedSize(&'static str, Type, Type),
     #[error("Invalid operation on {1:?}: {0}")]
-    InvalidOperation(&'static str, Type)
+    InvalidOperation(&'static str, Type),
 }
 
 pub type Result<T> = std::result::Result<T, TypeError>;
@@ -54,7 +56,7 @@ impl Type {
             Float32 => 4,
             Boolean => 1,
             Ptr(_) => 8,
-            Void => 0
+            Void => 0,
         }
     }
 
@@ -71,18 +73,20 @@ impl Type {
             "bool" => Boolean,
             "str" => Self::string(),
             "void" => Void,
-            _ => return Err(TypeError::Unknown(name.to_owned()))
+            _ => return Err(TypeError::Unknown(name.to_owned())),
         };
         Ok(ty)
     }
 
     pub fn from_node(node: Node) -> Result<Self> {
         match node {
-            Node::Identifier( typename, _) => Self::from_str(&typename),
-            Node::UnaryExpr { op: UnaryOperation::Deref, value, .. } => Ok(
-                Type::Ptr(box Self::from_node(value.node)?)
-            ),
-            _ => Err(TypeError::Unknown(format!("{node:?}")))
+            Node::Identifier(typename, _) => Self::from_str(&typename),
+            Node::UnaryExpr {
+                op: UnaryOperation::Deref,
+                value,
+                ..
+            } => Ok(Type::Ptr(box Self::from_node(value.node)?)),
+            _ => Err(TypeError::Unknown(format!("{node:?}"))),
         }
     }
 
@@ -103,15 +107,40 @@ impl Type {
         }
     }
 
-    pub fn ptr(ty: Type) -> Self {
-        Type::Ptr(box ty)
-    }
+    /// Alias for string type: `*u8`
     pub fn string() -> Self {
-        Self::ptr(Type::UInt8)
+        Type::UInt8.into_ptr()
     }
 
+    /// Creates a Type::Ptr from to this Type
+    pub fn into_ptr(self) -> Self {
+        Type::Ptr(box self)
+    }
+    /// Creates a TypeDescriptor from this Type which allows you to take its address
     pub fn addressable(self) -> TypeDescriptor {
         TypeDescriptor::from(self).addressable()
+    }
+
+    pub fn is_convertible_to(&self, dest: &Self) -> Result<()> {
+        let integer = SuperType::Integer;
+
+        if integer.verify_both(self, dest) {
+            // You can convert numbers to bigger numbers
+            if self.size() > dest.size() {
+                return Err(TypeError::MismatchedSize("cannot convert number to smaller one", self.clone(), dest.clone()));
+            }
+
+            Ok(())
+        } else if SuperType::verify_symetric(&Type::UInt64.into(), &SuperType::Ptr, self, dest) {
+            // You can convert pointers to u64s and vice-versa
+            Ok(())
+        } else {
+            Err(TypeError::Mismatched(
+                "cannot convert types",
+                self.clone().into(),
+                dest.clone(),
+            ))
+        }
     }
 }
 
@@ -142,7 +171,7 @@ impl From<Type> for TypeDescriptor {
     fn from(ty: Type) -> Self {
         Self {
             ty,
-            has_address: false
+            has_address: false,
         }
     }
 }
@@ -156,7 +185,7 @@ pub enum SuperType {
     Integer,
     Float,
     Number,
-    Ptr
+    Ptr,
 }
 
 impl From<Type> for SuperType {
@@ -179,14 +208,23 @@ impl SuperType {
     pub fn verify(&self, ty: &Type) -> bool {
         use SuperType::*;
         match self {
-            As(t)      => t == ty,
+            As(t) => t == ty,
             Or(t1, t2) => t1.verify(ty) || t2.verify(ty),
-            Signed     => matches!(ty, Type::Int8 | Type::Int32 | Type::Int64),
-            Unsigned   => matches!(ty, Type::UInt8 | Type::UInt32 | Type::UInt64),
-            Integer    => Signed.verify(ty) || Unsigned.verify(ty),
-            Float      => matches!(ty, Type::Float32),
-            Number     => Integer.verify(ty) || Float.verify(ty),
-            Ptr        => matches!(ty, Type::Ptr(_))
+            Signed => matches!(ty, Type::Int8 | Type::Int32 | Type::Int64),
+            Unsigned => matches!(ty, Type::UInt8 | Type::UInt32 | Type::UInt64),
+            Integer => Signed.verify(ty) || Unsigned.verify(ty),
+            Float => matches!(ty, Type::Float32),
+            Number => Integer.verify(ty) || Float.verify(ty),
+            Ptr => matches!(ty, Type::Ptr(_)),
         }
+    }
+
+    pub fn verify_both(&self, ty1: &Type, ty2: &Type) -> bool {
+        self.verify(ty1) && self.verify(ty2)
+    }
+
+    /// Checks if `(super1, super2)` matches either `(ty1, ty2)` or `(ty2, ty1)`
+    pub fn verify_symetric(super1: &Self, super2: &Self, ty1: &Type, ty2: &Type) -> bool {
+        (super1.verify(ty1) && super2.verify(ty2)) || (super1.verify(ty2) && super2.verify(ty1))
     }
 }
