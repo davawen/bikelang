@@ -278,7 +278,15 @@ impl Instruction {
                 format!("mov {}, {}", reg.as_str(), var.as_operand(func))
             }
             Instruction::Load(reg, value) => {
-                format!("mov {}, {}", reg.as_str(), value.as_operand(func))
+                // mov with 32 bit or greater operands automatically do zero-extend
+                if value.size() >= 4 || reg.size == value.size() {
+                    format!("mov {}, {}", reg.as_str(), value.as_operand(func))
+                } else {
+                    format!("movzx {}, {}", reg.as_str(), value.as_operand(func))
+                }
+            }
+            Instruction::LoadSignExtend(reg, value) => {
+                format!("movsx {}, {}", reg.as_str(), value.as_operand(func))
             }
             Instruction::Save(reg) => {
                 format!("sub rsp, {}\nmov {} [rsp], {}", reg.size, word_size(reg.size), reg.as_str())

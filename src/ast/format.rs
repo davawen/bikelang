@@ -11,7 +11,7 @@ impl Display for Ast {
         let (name, inner ) = match &self.node {
             Node::Number(n, ..) => ( format!("{ORANGE}NUMBER {n}"), None ),
             Node::Identifier(name, ..) => ( format!("IDENT {name}"), None ),
-            Node::StringLiteral(v) => ( format!("{GREEN}LITERAL"), Some(vec![format!("{GREEN}\"{v}\"{WHITE}\n")]) ),
+            Node::StringLiteral(v) => ( format!("{GREEN}LITERAL"), Some(vec![format!("{GREEN}{v:?}{WHITE}\n")]) ),
             Node::BoolLiteral(b) => {
                 let b = if *b { "TRUE" } else { "FALSE" };
                 ( format!("{ORANGE}{b}"), None )

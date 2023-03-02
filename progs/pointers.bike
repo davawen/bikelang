@@ -15,13 +15,14 @@ func main() {
 	str ptr = "String";
 	print#("S ascii: ");
 
-	u64 idx = 0;
+	i32 idx = 0;
 	loop {
 		if idx >= 6 { break };
 
-		*(ptr + idx) = *(ptr + idx) + 1;
+		str offset = ptr + |u64|idx;
+		*offset = *offset + 1;
 
-		putc(*(ptr + idx));
+		putc(*offset);
 
 		idx = idx + 1;
 	};

@@ -103,6 +103,7 @@ impl Instruction {
             VariableStore(var, val) => format!("{YELLOW}STORE{WHITE} {val} INTO {}", var.format(variable_names)),
             VariableLoad(reg, var) => format!("{YELLOW}LOAD{WHITE} {} INTO {reg}", var.format(variable_names)),
             Load(reg, val) => format!("{YELLOW}LOAD{WHITE} {val} into {reg}"),
+            LoadSignExtend(reg, val) => format!("{YELLOW}LOAD {PURPLE}SIGN-EXTEND{WHITE} {val} into {reg}"),
             Save(reg) => format!("{BLUE}SAVE{WHITE} {reg}"),
             Restore(reg) => format!("{BLUE}RESTORE{WHITE} {reg}"),
             StoreOperation(op) => op.format(variable_names),

@@ -99,14 +99,8 @@ impl Function {
                     },
                     op => {
                         value = self.fold_node(ir, app, func, scope, inner);
-                        let reg = if let Value::Register(reg) = value {
-                            reg
-                        } else  {
-                            let reg = Register::get(ir, value.size());
-                            self.instructions.push(Instruction::Load(reg, value));
-                            value = Value::Register(reg);
-                            reg
-                        };
+                        let reg = value.as_register(ir, &mut self.instructions);
+                        value = Value::Register(reg);
                         match op {
                             Deref => {
                                 value = Value::Register(reg.kind.with_size(ty.size()));
@@ -128,16 +122,9 @@ impl Function {
 
                 let (out, ins) = match op {
                     op if op.is_arithmetic() || op.is_logic() => {
-                        let reg = match lhs {
-                            Value::Register(reg) => reg,
-                            _ => {
-                                let reg = Register::get(ir, ty.size());
-                                self.instructions.push(Instruction::Load(reg, lhs));
-                                reg
-                            }
-                        };
-                        // result of operation is stored in register to the left
+                        let reg = lhs.as_register(ir, &mut self.instructions);
 
+                        // result of operation is stored in register to the left
                         (reg, Instruction::StoreOperation(Arithmetic::from_op(op, reg, rhs)))
                     }
                     op if op.is_comparison() => {
@@ -160,6 +147,35 @@ impl Function {
                 
                 self.instructions.push(ins);
                 Value::Register(out)
+            }
+            ast::Node::Convert(box expr, ty) => {
+                // Only do sign-extend with signed->signed conversions
+                // Which skips conversion entirely in same-sized signed->unsigned conversions
+                // unsigned->bigger signed = You want to keep the upper values
+                // signed->unsigned = Either you only have positive values or you want to interpret two's complement anyway
+
+                // If you have an unsigned -> bigger unsigned conversion, a load will zero-extend it automatically,
+                // but if you're reusing the register passed to you, that's both useless and unauthorized by x86.
+
+                let inner_type = expr.get_type();
+
+                let inner = self.fold_node(ir, app, func, scope, expr);
+
+                let reg = Register::get(ir, ty.size());
+
+                let ins = if SuperType::Signed.verify_both(&ty, &inner_type) {
+                    if inner_type.size() == ty.size() {
+                        Instruction::Load(reg, inner)
+                    } else {
+                        Instruction::LoadSignExtend(reg, inner)
+                    }
+                } else {
+                    Instruction::Load(reg, inner)
+                };
+                self.instructions.push(ins);
+                inner.free_register(ir);
+
+                Value::Register(reg)
             }
             ast::Node::Call { name, parameter_list, return_type } => {
                 let idx = app.function_definitions.get_index_of(&name).unwrap();
@@ -321,7 +337,7 @@ impl Function {
             ast::Node::BoolLiteral(b) => Value::Boolean(b),
             ast::Node::Definition { .. } => Value::NoValue,
             ast::Node::Empty => Value::NoValue,
-            ast::Node::FuncDef { .. } | ast::Node::Convert(..) => unreachable!("this ast node shouldn't be given to ir generation, got: {self:#?}"),
+            ast::Node::FuncDef { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {self:#?}"),
         }
     }
 
@@ -394,7 +410,7 @@ impl Ir {
     pub fn from_app(mut app: analysis::App) -> Self {
         let mut this = Self {
             functions: Vec::new(),
-            literals: Vec::new(),
+            literals: IndexSet::new(),
             used_registers: EnumMap::default()
         };
 
@@ -413,7 +429,7 @@ impl Ir {
     }
 
     pub fn push_literal(&mut self, value: String) -> LiteralIndex {
-        self.literals.push_idx(value)
+        self.literals.insert_full(value).0
     }
 
     /// Returns all registers currently in use
@@ -449,6 +465,18 @@ impl Value {
     fn free_register(&self, ir: &mut Ir) {
         if let Value::Register(reg) = self {
             reg.free_register(ir);
+        }
+    }
+
+    /// Returns the inner register if it's a Value::Register, else get a new one and put the value inside of it
+    fn as_register(self, ir: &mut Ir, instructions: &mut Vec<Instruction>) -> Register {
+        match self {
+            Value::Register(reg) => reg,
+            _ => {
+                let reg = Register::get(ir, self.size());
+                instructions.push(Instruction::Load(reg, self));
+                reg
+            }
         }
     }
 }

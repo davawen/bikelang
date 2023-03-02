@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use enum_map::{EnumMap, Enum};
+use indexmap::IndexSet;
 use slotmap::SlotMap;
 
 use crate::typed;
@@ -13,7 +14,7 @@ mod format;
 #[derive(Debug)]
 pub struct Ir {
     functions: Vec<Function>,
-    literals: Vec<String>,
+    literals: IndexSet<String>,
     used_registers: EnumMap<RegisterKind, bool>
 }
 
@@ -41,8 +42,10 @@ enum Instruction {
     VariableStore(Address, Value),
     /// Load the value from a stack variable or a memory address into a register
     VariableLoad(Register, Address),
-    /// Copies a value into a register
+    /// Copies a value into a register and zero extend it if necessary
     Load(Register, Value),
+    /// Copies a value into a register, incresing it's size to the given register's with a sign extend
+    LoadSignExtend(Register, Value),
     /// Saves the immediate value of a register to the top of the stack
     Save(Register),
     /// Restores the immediate value of a register at the top of the stack
@@ -120,7 +123,7 @@ enum Value {
 }
 
 #[allow(unused)]
-#[derive(Debug, Clone, Copy, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 enum RegisterKind {
     Rax,
     Rbx,

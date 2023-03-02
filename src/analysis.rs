@@ -334,10 +334,14 @@ impl Ast {
             Node::UnaryExpr { ty, .. } => ty,
             Node::Expr { ty, .. } => ty,
             Node::Block(_, ty) => ty,
+            Node::Convert(_, ty) => ty,
             Node::Number(_, ty) => ty,
             Node::Identifier(_, ty) => ty,
+            Node::BoolLiteral(_) => &Type::Boolean,
             Node::StringLiteral(_) => return Type::string(),
-            _ => &Type::Void
+            Node::Statement(..) | Node::FuncDef { .. } | Node::Loop { .. } | Node::If { .. }
+                | Node::Return(..) | Node::Break | Node::Intrisic(..) | Node::Empty
+                | Node::Definition { .. } => &Type::Void
         }.clone()
     }
 }

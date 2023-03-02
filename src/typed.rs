@@ -37,7 +37,7 @@ pub enum TypeError {
     Unknown(String),
     #[error("Expected type {1:?}, got {2:?}: {0}")]
     Mismatched(&'static str, SuperType, Type),
-    #[error("Mismatched size between {1:?}({} bytea) and {2:?}({} bytes): {0}", .1.size(), .2.size())]
+    #[error("Mismatched size between {1:?}({} bytes) and {2:?}({} bytes): {0}", .1.size(), .2.size())]
     MismatchedSize(&'static str, Type, Type),
     #[error("Invalid operation on {1:?}: {0}")]
     InvalidOperation(&'static str, Type),
@@ -217,6 +217,10 @@ impl SuperType {
             Number => Integer.verify(ty) || Float.verify(ty),
             Ptr => matches!(ty, Type::Ptr(_)),
         }
+    }
+
+    pub fn verify_any(&self, ty1: &Type, ty2: &Type) -> bool {
+        self.verify(ty1) || self.verify(ty2)
     }
 
     pub fn verify_both(&self, ty1: &Type, ty2: &Type) -> bool {
