@@ -40,6 +40,7 @@ pub enum Token {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Keyword {
+    Let,
     Func,
     If,
     Loop,
@@ -53,6 +54,7 @@ impl FromStr for Keyword {
     type Err = ();
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let k = match s {
+            "let" => Keyword::Let,
             "func" => Keyword::Func,
             "if" => Keyword::If,
             "loop" => Keyword::Loop,

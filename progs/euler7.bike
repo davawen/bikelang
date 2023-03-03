@@ -1,5 +1,5 @@
 func is_prime(i64 n) -> bool {
-	i64 idx = 2;
+	let i64 idx = 2;
 	loop {
 		if n % idx == 0 { return false };
 		if idx >= n/2 { return true };
@@ -9,8 +9,8 @@ func is_prime(i64 n) -> bool {
 }
 
 func main() -> void {
-	i64 idx = 1;
-	i64 prime_idx = 1;
+	let i64 idx = 1;
+	let i64 prime_idx = 1;
 	
 	loop {
 		if is_prime(idx) {

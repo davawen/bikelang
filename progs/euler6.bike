@@ -1,7 +1,7 @@
 func main() -> void {
-	i32 idx = 0;
-	i32 s_sum = 0;
-	i32 sum = 0;
+	let i32 idx = 0;
+	let i32 s_sum = 0;
+	let i32 sum = 0;
 
 	loop {
 		if idx > 100 { break };

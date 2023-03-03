@@ -2,15 +2,19 @@ use super::*;
 
 /// Parsing mode
 trait Mode {
+    type Output;
+
     fn lbp(&self, item: &Item) -> Result<u32>;
 
-    fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Ast>;
-    fn led(&self, item: Item, lexer: &mut Lexer, left: Ast) -> Result<Ast>;
+    fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Self::Output>;
+    fn led(&self, item: Item, lexer: &mut Lexer, left: Self::Output) -> Result<Self::Output>;
 }
 
 struct ExpressionMode;
 
 impl Mode for ExpressionMode {
+    type Output = Ast;
+
     fn lbp(&self, item: &Item) -> Result<u32> {
         use Token::*;
         use Operation::*;
@@ -25,7 +29,6 @@ impl Mode for ExpressionMode {
             }
             Paren(Dir::Left) => 70, // operator ()
             Hash => 70,
-            Word(_) => 5, 
             Brace(Dir::Left) => 1, // allow stopping at opening brace
             Paren(Dir::Right) | Brace(Dir::Right) | Keyword(_) | Comma | Semicolon | Eof => 0,
             token => return Err(AstError::UnexpectedToken("unbindable token used infix", token.clone())).at_item(item)
@@ -33,7 +36,7 @@ impl Mode for ExpressionMode {
         Ok(out)
     }
 
-    fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Ast>{
+    fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Self::Output>{
         use Token::*;
         let node = match item.token {
             Number(n) => Node::Number(n, Type::Void).ast(item.bounds),
@@ -41,7 +44,6 @@ impl Mode for ExpressionMode {
             Word(name) => Node::Identifier(name, Type::Void).ast(item.bounds),
             Op(Operation::Lesser) => { // parse type conversion
                 let convert_to = pratt(&TypeMode, lexer, 0)?;
-                let convert_to = Type::from_node(convert_to.node).at(convert_to.bounds)?;
                 lexer.expect(Token::Op(Operation::Greater))?;
 
                 let operand = box pratt(self, lexer, 60)?;
@@ -73,16 +75,29 @@ impl Mode for ExpressionMode {
             Keyword(keyword) => {
                 use token::Keyword::*;
                 match keyword {
+                    Let => {
+                        let typename = pratt(&TypeMode, lexer, 0)?;
+                        let name = lexer.next();
+                        let rbounds = name.bounds;
+                        let Token::Word(name) = name.token else {
+                            return Err(AstError::ExpectedToken(Token::Word("variable-name".to_owned()), name.token)).at(rbounds)
+                        };
+
+                        Node::Definition {
+                            typename,
+                            name
+                        }.ast(item.bounds.with_end_of(rbounds))
+                    }
                     Func => {
                         let name = lexer.next();
                         let Token::Word(name) = name.token
                             else { return Err(AstError::Expected("a function name", name.token)).at(name.bounds) };
 
                         lexer.expect(Token::Paren(Dir::Left))?;
-                        let (parameter_list, _) = parameter_list(lexer)?;
+                        let parameter_list = parameter_list(lexer)?;
                         let return_type = if lexer.peek().token == Token::Arrow {
                             lexer.next();
-                            Type::from_node(pratt(self, lexer, 1)?.node).unwrap()
+                            pratt(&TypeMode, lexer, 0)?
                         } else {
                             Type::Void
                         };
@@ -144,7 +159,7 @@ impl Mode for ExpressionMode {
         Ok(node)
     } 
 
-    fn led(&self, item: Item, lexer: &mut Lexer, left: Ast) -> Result<Ast> {
+    fn led(&self, item: Item, lexer: &mut Lexer, left: Ast) -> Result<Self::Output> {
         use Token::*;
         let node = match item.token {
             Op(op) => {
@@ -179,17 +194,11 @@ impl Mode for ExpressionMode {
                     }
                 )
             }
-            Word(name) => { // got (type) variable
-                Node::Definition {
-                    typename: Type::from_node(left.node).at(left.bounds)?,
-                    name
-                }.ast(left.bounds.with_end_of(item.bounds))
-            }
             Paren(Dir::Left) => { // parenthesis operator = function call
                 let Node::Identifier(name, _) = left.node
                     else { return Err(AstError::ExpectedNode("a function name", left.node)).at(left.bounds)};
 
-                let (parameter_list, rtoken) = parameter_list(lexer)?;
+                let (parameter_list, rtoken) = argument_list(lexer)?;
                 Node::Call {
                     name,
                     return_type: Type::Void,
@@ -201,7 +210,7 @@ impl Mode for ExpressionMode {
                     else { return Err(AstError::ExpectedNode("an intrisic name", left.node)).at(left.bounds) };
 
                 lexer.expect(Token::Paren(Dir::Left))?;
-                let (list, rtoken) = parameter_list(lexer)?;
+                let (list, rtoken) = argument_list(lexer)?;
 
                 let intrisic = match name.as_str() {
                     "asm" => Intrisic::Asm(box list.into_iter().next().unwrap()),
@@ -219,32 +228,28 @@ impl Mode for ExpressionMode {
 
 struct TypeMode;
 impl Mode for TypeMode {
+    type Output = Type;
+
     fn lbp(&self, item: &Item) -> Result<u32> {
         use Token::*;
-        // > to close
+        // > to close type conversions
+        // stop on left-binding word = declaration
         let out = match &item.token {
-            Op(Operation::Greater) => 0,
+            Op(Operation::Greater) | Comma | Word(_) | Brace(Dir::Left) => 0,
             token => return Err(AstError::UnexpectedToken("cannot use token in type declaration", token.clone())).at_item(item)
         };
         Ok(out)
     }
 
-    fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Ast> {
+    fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Self::Output> {
         use Token::*;
         let node = match item.token {
             Op(Operation::Times) => {
-                let value = box pratt(self, lexer, 60)?;
-                Ast::new(
-                    item.bounds.with_end_of(value.bounds),
-                    Node::UnaryExpr {
-                        op: UnaryOperation::Deref,
-                        ty: Type::Void,
-                        value
-                    }
-                )
+                let inner = pratt(self, lexer, 60)?;
+                inner.into_ptr()
             },
             Word(typename) => {
-                Node::Identifier(typename, Type::Void).ast(item.bounds)
+                Type::from_str(&typename).at(item.bounds)?
             }
             token => return Err(AstError::UnexpectedToken("cannot create type from token", token)).at(item.bounds)
         };
@@ -252,27 +257,63 @@ impl Mode for TypeMode {
         Ok(node)
     }
     
-    fn led(&self, item: Item, _lexer: &mut Lexer, _left: Ast) -> Result<Ast> {
+    fn led(&self, item: Item, _lexer: &mut Lexer, _left: Self::Output) -> Result<Self::Output> {
         Err(AstError::UnexpectedToken("no left binding token in type declarations", item.token)).at(item.bounds)
     }
 }
 
 
 impl Item {
-    fn lbp(&self, mode: &dyn Mode) -> Result<u32> {
+    fn lbp<T>(&self, mode: &dyn Mode<Output = T>) -> Result<u32> {
         mode.lbp(self)
     }
 
-    fn nud(self, mode: &dyn Mode, lexer: &mut Lexer) -> Result<Ast> {
+    fn nud<T>(self, mode: &dyn Mode<Output = T>, lexer: &mut Lexer) -> Result<T> {
         mode.nud(self, lexer)
     }
 
-    fn led(self, mode: &dyn Mode, lexer: &mut Lexer, left: Ast) -> Result<Ast> {
+    fn led<T>(self, mode: &dyn Mode<Output = T>, lexer: &mut Lexer, left: T) -> Result<T> {
         mode.led(self, lexer, left)
     }
 }
 
-fn parameter_list(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
+/// Parses a list of function parameters in the form `type var, type var`
+/// Always returns a list of definitions
+fn parameter_list(lexer: &mut Lexer) -> Result<Vec<Ast>> {
+    let mut list = Vec::new();
+    if lexer.peek().token != Token::Paren(Dir::Right) {
+        loop {
+            let definition = {
+                let start = lexer.peek().bounds; // Types don't have bounds so get it manually
+                
+                let typename = pratt(&TypeMode, lexer, 0)?;
+                let name = lexer.next();
+                let rbounds = name.bounds;
+                let Token::Word(name) = name.token else {
+                    return Err(AstError::ExpectedToken(Token::Word("variable-name".to_owned()), name.token)).at(rbounds)
+                };
+
+                Node::Definition {
+                    typename,
+                    name
+                }.ast(start.with_end_of(rbounds))
+            };
+
+            list.push(definition);
+            if lexer.peek().token != Token::Comma {
+                break;
+            }
+            lexer.expect(Token::Comma)?;
+        }
+    }
+    lexer.expect(Token::Paren(Dir::Right))?;
+
+    Ok(list)
+}
+
+/// Parses a list of comma separated expressions
+/// Returns the closing parenthesis of the argument list
+fn argument_list(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
     let mut list = Vec::new();
     if lexer.peek().token != Token::Paren(Dir::Right) {
         loop {
@@ -305,7 +346,7 @@ fn parse_block(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
     Ok((block, lexer.expect(Token::Brace(Dir::Right))?))
 }
 
-fn pratt(mode: &dyn Mode, lexer: &mut Lexer, rbp: u32) -> Result<Ast> {
+fn pratt<T>(mode: &dyn Mode<Output = T>, lexer: &mut Lexer, rbp: u32) -> Result<T> {
     let mut t = lexer.next();
     let mut left = t.nud(mode, lexer)?;
 

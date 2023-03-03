@@ -78,18 +78,6 @@ impl Type {
         Ok(ty)
     }
 
-    pub fn from_node(node: Node) -> Result<Self> {
-        match node {
-            Node::Identifier(typename, _) => Self::from_str(&typename),
-            Node::UnaryExpr {
-                op: UnaryOperation::Deref,
-                value,
-                ..
-            } => Ok(Type::Ptr(box Self::from_node(value.node)?)),
-            _ => Err(TypeError::Unknown(format!("{node:?}"))),
-        }
-    }
-
     pub fn expect(self, expected: SuperType, msg: &'static str) -> Result<Self> {
         if expected.verify(&self) {
             Ok(self)

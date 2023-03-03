@@ -3,7 +3,7 @@ func mutate(*i32 val) {
 }
 
 func main() {
-	i32 i = 10;
+	let i32 i = 10;
 
 	print#("i: ", i, ", i+1 = ");
 	mutate(&i);

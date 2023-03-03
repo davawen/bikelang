@@ -1,5 +1,5 @@
 func putc(u8 char) -> u8 {
-	u8 val = char; // no optimization >:(
+	let u8 val = char; // no optimization >:(
 	asm#("
 	mov rax, 1
 	mov rdi, 1
@@ -12,14 +12,14 @@ func putc(u8 char) -> u8 {
 }
 
 func main() {
-	str ptr = "String";
+	let str ptr = "String";
 	print#("S ascii: ");
 
-	i32 idx = 0;
+	let i32 idx = 0;
 	loop {
 		if idx >= 6 { break };
 
-		str offset = ptr + <u64>idx;
+		let str offset = ptr + <u64>idx;
 		*offset = *offset + 1;
 
 		putc(*offset);

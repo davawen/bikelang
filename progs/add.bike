@@ -3,8 +3,8 @@ func add(i32 a, i32 b) -> i32 {
 }
 
 func main() {
-	i32 a = <i32><i8>1;
-	i32 b = 2;
-	i32 c = add(a, b);
+	let i32 a = 1;
+	let i32 b = 2;
+	let i32 c = add(a, b);
 	print#("Value of c is: ", c, "\n");
 }

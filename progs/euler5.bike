@@ -1,8 +1,8 @@
 func main() -> void {
-	i32 num = 1;
+	let i32 num = 1;
 	loop {
-		i32 check = 1;
-		bool cond = true;
+		let i32 check = 1;
+		let bool cond = true;
 
 		loop {
 			if check > 20 { break };
