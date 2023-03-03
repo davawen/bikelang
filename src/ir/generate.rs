@@ -1,6 +1,6 @@
 use itertools::Itertools;
 
-use crate::{ast::{self, BinaryOperation, UnaryOperation}, analysis, utility::PushIndex, typed::{Type, SuperType}};
+use crate::{ast::{self, BinaryOperation, UnaryOperation}, analysis, typed::{Type, SuperType}};
 
 use super::*;
 
@@ -61,7 +61,7 @@ impl Comparison {
 
 impl Function {
     /// Invariant: app's function_bodies can't be used!
-    fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, func: &analysis::Function, scope: &[Scope], ast: ast::Ast) -> Value {
+    fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, _func: &analysis::Function, scope: &[Scope], ast: ast::Ast) -> Value {
         match ast.node {
             ast::Node::Expr { op: BinaryOperation::Assignment, ty: _, box lhs, box rhs } => {
                 let address = match lhs.node {
@@ -70,13 +70,13 @@ impl Function {
                         var.into()
                     }
                     ast::Node::UnaryExpr { op: UnaryOperation::Deref, ty, value: var, .. } => {
-                        let var = self.fold_node(ir, app, func, scope, *var);
+                        let var = self.fold_node(ir, app, _func, scope, *var);
                         Address::Ptr(var, ty.size())
                     }
                     _ => unreachable!("Cannot assign to {lhs:?}"),
                 };
 
-                let rhs = self.fold_node(ir, app, func, scope, rhs);
+                let rhs = self.fold_node(ir, app, _func, scope, rhs);
 
                 address.free_register(ir);
                 rhs.free_register(ir);
@@ -91,14 +91,14 @@ impl Function {
                 use UnaryOperation::*;
                 let op = match op {
                     AddressOf => {
-                        let ast::Node::Identifier(name, ty) = inner.node 
+                        let ast::Node::Identifier(name, _ty) = inner.node 
                             else { unreachable!("Trying to take address of literal") };
                         let reg = Register::get(ir, 8);
                         value = Value::Register(reg);
                         Arithmetic::AddressOf(reg, self.named_variables[&name])
                     },
                     op => {
-                        value = self.fold_node(ir, app, func, scope, inner);
+                        value = self.fold_node(ir, app, _func, scope, inner);
                         let reg = value.as_register(ir, &mut self.instructions);
                         value = Value::Register(reg);
                         match op {
@@ -117,8 +117,8 @@ impl Function {
                 value
             }
             ast::Node::Expr { op, ty, box lhs, box rhs } => {
-                let lhs = self.fold_node(ir, app, func, scope, lhs);
-                let rhs = self.fold_node(ir, app, func, scope, rhs);
+                let lhs = self.fold_node(ir, app, _func, scope, lhs);
+                let rhs = self.fold_node(ir, app, _func, scope, rhs);
 
                 let (out, ins) = match op {
                     op if op.is_arithmetic() || op.is_logic() => {
@@ -159,7 +159,7 @@ impl Function {
 
                 let inner_type = expr.get_type();
 
-                let inner = self.fold_node(ir, app, func, scope, expr);
+                let inner = self.fold_node(ir, app, _func, scope, expr);
 
                 let reg = Register::get(ir, ty.size());
 
@@ -181,7 +181,7 @@ impl Function {
                 let idx = app.function_definitions.get_index_of(&name).unwrap();
 
                 let return_size = return_type.size();
-                let parameters: Vec<_> = parameter_list.into_iter().map(|n| self.fold_node(ir, app, func, scope, n)).collect();
+                let parameters: Vec<_> = parameter_list.into_iter().map(|n| self.fold_node(ir, app, _func, scope, n)).collect();
                 for p in &parameters {
                     p.free_register(ir);
                 }
@@ -222,16 +222,16 @@ impl Function {
             ast::Node::Intrisic(i) => {
                 match i {
                     ast::Intrisic::Asm(box str) => {
-                        let str = self.fold_node(ir, app, func, scope, str);
+                        let str = self.fold_node(ir, app, _func, scope, str);
                         self.instructions.push(Instruction::Intrisic(Intrisic::Asm(str)));
                     },
                     ast::Intrisic::Print(values) => {
                         for node in values {
                             // Desugar print intrisic
                             let print = match node.get_type().clone() {
-                                Type::Ptr(box Type::UInt8) => Intrisic::PrintString(self.fold_node(ir, app, func, scope, node)),
+                                Type::Ptr(box Type::UInt8) => Intrisic::PrintString(self.fold_node(ir, app, _func, scope, node)),
                                 ty if SuperType::Integer.verify(&ty) => {
-                                    let num = self.fold_node(ir, app, func, scope, node);
+                                    let num = self.fold_node(ir, app, _func, scope, node);
                                     num.free_register(ir);
                                     Intrisic::PrintNumber(num, ty)
                                 }
@@ -250,8 +250,8 @@ impl Function {
 
                 let jump = match condition.node { 
                     ast::Node::Expr { op, ty: _, lhs, rhs} if op.is_comparison() => {
-                        let lhs = self.fold_node(ir, app, func, scope, *lhs);
-                        let rhs = self.fold_node(ir, app, func, scope, *rhs);
+                        let lhs = self.fold_node(ir, app, _func, scope, *lhs);
+                        let rhs = self.fold_node(ir, app, _func, scope, *rhs);
 
                         // Allow using registers after this instruction
                         // Note: this is fine because the comparison is pushed right after
@@ -261,7 +261,7 @@ impl Function {
                         Comparison::from_op(op, lhs, rhs).inverse() // Skip the function's body if the condition is NOT true
                     } 
                     _ => {
-                        let value = self.fold_node(ir, app, func, scope, condition);
+                        let value = self.fold_node(ir, app, _func, scope, condition);
                         value.free_register(ir);
 
                         Comparison::NotZero(value).inverse()
@@ -272,7 +272,7 @@ impl Function {
 
                 self.instructions.push(Instruction::Jump(idx, jump));
 
-                self.fold_node(ir, app, func, scope, body).free_register(ir);
+                self.fold_node(ir, app, _func, scope, body).free_register(ir);
                 self.instructions.push(Instruction::Label(idx));
                 
                 Value::NoValue
@@ -284,7 +284,7 @@ impl Function {
                 let scope = &[scope, &[Scope::Loop { start_label: loop_start, end_label: loop_end }]].concat();
 
                 self.instructions.push(Instruction::Label(loop_start));
-                self.fold_node(ir, app, func, scope, body).free_register(ir);
+                self.fold_node(ir, app, _func, scope, body).free_register(ir);
 
                 self.instructions.push(Instruction::Jump(loop_start, Comparison::Unconditional));
                 self.instructions.push(Instruction::Label(loop_end));
@@ -300,7 +300,7 @@ impl Function {
                 Value::NoValue
             }
             ast::Node::Return(inner) => {
-                let inner = self.fold_node(ir, app, func, scope, *inner);
+                let inner = self.fold_node(ir, app, _func, scope, *inner);
                 inner.free_register(ir);
                 if let Some(return_variable) = self.return_variable {
                     self.instructions.push(Instruction::VariableStore(return_variable.into(), inner));
@@ -314,17 +314,17 @@ impl Function {
                 let mut it = nodes.into_iter().peekable();
                 while let Some(node) = it.next() {
                     if it.peek().is_none() { // if last node
-                        return self.fold_node(ir, app, func, scope, node);
+                        return self.fold_node(ir, app, _func, scope, node);
                     }
                     else {
-                        self.fold_node(ir, app, func, scope, node).free_register(ir);
+                        self.fold_node(ir, app, _func, scope, node).free_register(ir);
                     }
                 }
 
                 Value::NoValue
             }
             ast::Node::Statement(inner) => {
-                self.fold_node(ir, app, func, scope, *inner).free_register(ir);
+                self.fold_node(ir, app, _func, scope, *inner).free_register(ir);
                 Value::NoValue
             }
             ast::Node::Identifier(name, ty) => {

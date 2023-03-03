@@ -4,7 +4,7 @@ use std::fs;
 use clap::Parser;
 
 use crate::{
-    token::Lexer, ast::parse_ast,
+    token::Lexer, ast::parse::parse_ast,
 };
 
 mod utility;

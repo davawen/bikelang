@@ -279,8 +279,11 @@ impl Instruction {
             }
             Instruction::Load(reg, value) => {
                 // mov with 32 bit or greater operands automatically do zero-extend
-                if value.size() >= 4 || reg.size == value.size() {
+                if reg.size == value.size() {
                     format!("mov {}, {}", reg.as_str(), value.as_operand(func))
+                } else if value.size() == 4 { 
+                    // mov zero extend is weird as shit for 32bit operands fuck this shit fuch life fuck me https://www.felixcloutier.com/x86/movzx
+                    format!("mov {}, {}", reg.kind.with_size(4).as_str(), value.as_operand(func))
                 } else {
                     format!("movzx {}, {}", reg.as_str(), value.as_operand(func))
                 }

@@ -19,7 +19,7 @@ func main() {
 	loop {
 		if idx >= 6 { break };
 
-		str offset = ptr + |u64|idx;
+		str offset = ptr + <u64>idx;
 		*offset = *offset + 1;
 
 		putc(*offset);

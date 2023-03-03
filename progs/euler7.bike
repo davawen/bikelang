@@ -1,5 +1,5 @@
-func is_prime(i32 n) -> bool {
-	i32 idx = 2;
+func is_prime(i64 n) -> bool {
+	i64 idx = 2;
 	loop {
 		if n % idx == 0 { return false };
 		if idx >= n/2 { return true };
@@ -9,15 +9,18 @@ func is_prime(i32 n) -> bool {
 }
 
 func main() -> void {
-	i32 idx = 1;
+	i64 idx = 1;
+	i64 prime_idx = 1;
 	
 	loop {
-		if idx > 100 { break };
-
 		if is_prime(idx) {
-			print#(idx, ", ");
+			//print#(idx, ", ");
+			prime_idx = prime_idx + 1;
 		};
+		if prime_idx > 10001 { break };
 
 		idx = idx + 1;
 	};
+
+	print#(prime_idx, "'s prime is: ", idx, "\n");
 }

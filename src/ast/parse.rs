@@ -1,0 +1,332 @@
+use super::*;
+
+/// Parsing mode
+trait Mode {
+    fn lbp(&self, item: &Item) -> Result<u32>;
+
+    fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Ast>;
+    fn led(&self, item: Item, lexer: &mut Lexer, left: Ast) -> Result<Ast>;
+}
+
+struct ExpressionMode;
+
+impl Mode for ExpressionMode {
+    fn lbp(&self, item: &Item) -> Result<u32> {
+        use Token::*;
+        use Operation::*;
+        let out = match &item.token {
+            Op(op) => match op {
+                Assignment => 10,
+                LogicalAnd | LogicalOr | LogicalXor => 20,
+                Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => 30,
+                Plus | Minus => 40,
+                Times | Div | Modulus => 50,
+                Exclamation | AddressOf => return Err(AstError::WrongOperation(*op, "as an infix operator")).at_item(item) 
+            }
+            Paren(Dir::Left) => 70, // operator ()
+            Hash => 70,
+            Word(_) => 5, 
+            Brace(Dir::Left) => 1, // allow stopping at opening brace
+            Paren(Dir::Right) | Brace(Dir::Right) | Keyword(_) | Comma | Semicolon | Eof => 0,
+            token => return Err(AstError::UnexpectedToken("unbindable token used infix", token.clone())).at_item(item)
+        };
+        Ok(out)
+    }
+
+    fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Ast>{
+        use Token::*;
+        let node = match item.token {
+            Number(n) => Node::Number(n, Type::Void).ast(item.bounds),
+            StringLiteral(s) => Node::StringLiteral(s).ast(item.bounds),
+            Word(name) => Node::Identifier(name, Type::Void).ast(item.bounds),
+            Op(Operation::Lesser) => { // parse type conversion
+                let convert_to = pratt(&TypeMode, lexer, 0)?;
+                let convert_to = Type::from_node(convert_to.node).at(convert_to.bounds)?;
+                lexer.expect(Token::Op(Operation::Greater))?;
+
+                let operand = box pratt(self, lexer, 60)?;
+
+                Ast::new(
+                    item.bounds.with_end_of(operand.bounds),
+                    Node::Convert(operand, convert_to)
+                )
+            }
+            Op(op) => {
+                let (op, power) = match op {
+                    Operation::Minus => (UnaryOperation::Negation, 60),
+                    Operation::Times => (UnaryOperation::Deref, 60),
+                    Operation::AddressOf => (UnaryOperation::AddressOf, 60),
+                    Operation::Exclamation => (UnaryOperation::LogicalNot, 60),
+                    _ => return Err(AstError::WrongOperation(op, "as a prefix operator")).at_item(&item)
+                };
+
+                let value = box pratt(self, lexer, power)?;
+                Ast::new(
+                    item.bounds.with_end_of(value.bounds),
+                    Node::UnaryExpr {
+                        op,
+                        ty: Type::Void,
+                        value
+                    }
+                )
+            }
+            Keyword(keyword) => {
+                use token::Keyword::*;
+                match keyword {
+                    Func => {
+                        let name = lexer.next();
+                        let Token::Word(name) = name.token
+                            else { return Err(AstError::Expected("a function name", name.token)).at(name.bounds) };
+
+                        lexer.expect(Token::Paren(Dir::Left))?;
+                        let (parameter_list, _) = parameter_list(lexer)?;
+                        let return_type = if lexer.peek().token == Token::Arrow {
+                            lexer.next();
+                            Type::from_node(pratt(self, lexer, 1)?.node).unwrap()
+                        } else {
+                            Type::Void
+                        };
+
+                        let body = box pratt(self, lexer, 0)?;
+                        Ast::new(
+                            item.bounds.with_end_of(body.bounds),
+                            Node::FuncDef {
+                                name,
+                                parameter_list,
+                                body,
+                                return_type
+                            }
+                        )
+                    }
+                    If => {
+                        let condition = box pratt(self, lexer, 1)?;
+                        let body = box pratt(self, lexer, 0)?;
+                        Ast::new(
+                            item.bounds.with_end_of(body.bounds),
+                            Node::If {
+                                condition,
+                                body
+                            }
+                        )
+                    }
+                    Loop => {
+                        let body = box pratt(self, lexer, 0)?;
+                        Ast::new(
+                            item.bounds.with_end_of(body.bounds),
+                            Node::Loop {
+                                body
+                            }
+                        )
+                    }
+                    Break => Node::Break.ast(item.bounds),
+                    Return => {
+                        let expr = box pratt(self, lexer, 0)?;
+                        Ast::new(item.bounds.with_end_of(expr.bounds), Node::Return(expr))
+                    }
+                    True => Ast::new(item.bounds, Node::BoolLiteral(true)),
+                    False => Ast::new(item.bounds, Node::BoolLiteral(false))
+                }
+            }
+            Paren(Dir::Left) => { // parenthesis for grouping operations
+                let inner = pratt(self, lexer, 0)?;
+                let rparen = lexer.expect(Paren(Dir::Right))?;
+
+                inner.extend(item.bounds.with_end_of(rparen.bounds))
+            }
+            Brace(Dir::Left) => {
+                let (inner, rtoken) = parse_block(lexer)?;
+                Node::Block(inner, Type::Void).ast(item.bounds.with_end_of(rtoken.bounds))
+            }
+            Semicolon => Node::Empty.ast_from(item),
+            _ => unreachable!("{item:#?}")
+        };
+
+        Ok(node)
+    } 
+
+    fn led(&self, item: Item, lexer: &mut Lexer, left: Ast) -> Result<Ast> {
+        use Token::*;
+        let node = match item.token {
+            Op(op) => {
+                use Operation::*;
+                let (op, power) = match op {
+                    Assignment      => (BinaryOperation::Assignment, 9),
+                    LogicalAnd      => (BinaryOperation::LogicalAnd, 21),
+                    LogicalOr       => (BinaryOperation::LogicalOr, 21),
+                    LogicalXor      => (BinaryOperation::LogicalXor, 21),
+                    Equals          => (BinaryOperation::Equals, 31),
+                    NotEquals       => (BinaryOperation::NotEquals, 31),
+                    Greater         => (BinaryOperation::Greater, 31),
+                    GreaterOrEquals => (BinaryOperation::GreaterOrEquals, 31),
+                    Lesser          => (BinaryOperation::Lesser, 31),
+                    LesserOrEquals  => (BinaryOperation::LesserOrEquals, 31),
+                    Plus            => (BinaryOperation::Add, 41),
+                    Minus           => (BinaryOperation::Sub, 41),
+                    Times           => (BinaryOperation::Mul, 51),
+                    Div             => (BinaryOperation::Div, 51),
+                    Modulus         => (BinaryOperation::Modulus, 51),
+                    Exclamation | AddressOf => unreachable!() // error emitted in left_binding_power()
+                };
+
+                let rhs = box pratt(self, lexer, power)?;
+                Ast::new(
+                    left.bounds.with_end_of(rhs.bounds),
+                    Node::Expr {
+                        op,
+                        ty: Type::Void,
+                        lhs: box left,
+                        rhs
+                    }
+                )
+            }
+            Word(name) => { // got (type) variable
+                Node::Definition {
+                    typename: Type::from_node(left.node).at(left.bounds)?,
+                    name
+                }.ast(left.bounds.with_end_of(item.bounds))
+            }
+            Paren(Dir::Left) => { // parenthesis operator = function call
+                let Node::Identifier(name, _) = left.node
+                    else { return Err(AstError::ExpectedNode("a function name", left.node)).at(left.bounds)};
+
+                let (parameter_list, rtoken) = parameter_list(lexer)?;
+                Node::Call {
+                    name,
+                    return_type: Type::Void,
+                    parameter_list
+                }.ast(left.bounds.with_end_of(rtoken.bounds))
+            }
+            Hash => {
+                let Node::Identifier(name, _) = left.node
+                    else { return Err(AstError::ExpectedNode("an intrisic name", left.node)).at(left.bounds) };
+
+                lexer.expect(Token::Paren(Dir::Left))?;
+                let (list, rtoken) = parameter_list(lexer)?;
+
+                let intrisic = match name.as_str() {
+                    "asm" => Intrisic::Asm(box list.into_iter().next().unwrap()),
+                    "print" => Intrisic::Print(list),
+                    _ => return Err(AstError::UnknownIntrisic(name)).at(left.bounds)
+                };
+                Node::Intrisic(intrisic).ast(left.bounds.with_end_of(rtoken.bounds))
+            }
+            _ => unreachable!("{item:#?}")
+        };
+
+        Ok(node)
+    } 
+}
+
+struct TypeMode;
+impl Mode for TypeMode {
+    fn lbp(&self, item: &Item) -> Result<u32> {
+        use Token::*;
+        // > to close
+        let out = match &item.token {
+            Op(Operation::Greater) => 0,
+            token => return Err(AstError::UnexpectedToken("cannot use token in type declaration", token.clone())).at_item(item)
+        };
+        Ok(out)
+    }
+
+    fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Ast> {
+        use Token::*;
+        let node = match item.token {
+            Op(Operation::Times) => {
+                let value = box pratt(self, lexer, 60)?;
+                Ast::new(
+                    item.bounds.with_end_of(value.bounds),
+                    Node::UnaryExpr {
+                        op: UnaryOperation::Deref,
+                        ty: Type::Void,
+                        value
+                    }
+                )
+            },
+            Word(typename) => {
+                Node::Identifier(typename, Type::Void).ast(item.bounds)
+            }
+            token => return Err(AstError::UnexpectedToken("cannot create type from token", token)).at(item.bounds)
+        };
+
+        Ok(node)
+    }
+    
+    fn led(&self, item: Item, _lexer: &mut Lexer, _left: Ast) -> Result<Ast> {
+        Err(AstError::UnexpectedToken("no left binding token in type declarations", item.token)).at(item.bounds)
+    }
+}
+
+
+impl Item {
+    fn lbp(&self, mode: &dyn Mode) -> Result<u32> {
+        mode.lbp(self)
+    }
+
+    fn nud(self, mode: &dyn Mode, lexer: &mut Lexer) -> Result<Ast> {
+        mode.nud(self, lexer)
+    }
+
+    fn led(self, mode: &dyn Mode, lexer: &mut Lexer, left: Ast) -> Result<Ast> {
+        mode.led(self, lexer, left)
+    }
+}
+
+fn parameter_list(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
+    let mut list = Vec::new();
+    if lexer.peek().token != Token::Paren(Dir::Right) {
+        loop {
+            list.push(pratt(&ExpressionMode, lexer, 0)?);
+            if lexer.peek().token != Token::Comma {
+                break;
+            }
+            lexer.expect(Token::Comma)?;
+        }
+    }
+    
+    Ok((list, lexer.expect(Token::Paren(Dir::Right))?))
+}
+
+fn parse_block(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
+    let mut block = Vec::new();
+    while lexer.peek().token != Token::Brace(Dir::Right) {
+        let expr = pratt(&ExpressionMode, lexer, 0)?;
+        let next = lexer.peek();
+
+        if next.token == Token::Semicolon {
+            block.push(Ast::new(expr.bounds.with_end_of(next.bounds), Node::Statement(box expr)));
+            lexer.next();
+        }
+        else {
+            block.push(expr);
+        }
+    }
+    
+    Ok((block, lexer.expect(Token::Brace(Dir::Right))?))
+}
+
+fn pratt(mode: &dyn Mode, lexer: &mut Lexer, rbp: u32) -> Result<Ast> {
+    let mut t = lexer.next();
+    let mut left = t.nud(mode, lexer)?;
+
+    while lexer.peek().lbp(mode)? > rbp {
+        t = lexer.next();
+
+        left = t.led(mode, lexer, left)?;
+    }
+
+    Ok(left)
+}
+
+pub fn parse_ast(lexer: &mut Lexer) -> Result<Ast> {
+    let mut root = Vec::new();
+    while lexer.peek().token != Token::Eof {
+        root.push(pratt(&ExpressionMode, lexer, 0)?);
+    }
+
+    let bounds = Bounds {
+        start: root.first().map(|x| x.bounds.start).unwrap_or(0),
+        end: root.last().map(|x| x.bounds.end).unwrap_or(0) 
+    };
+    Ok(Node::Block(root, Type::Void).ast(bounds))
+}

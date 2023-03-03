@@ -29,9 +29,6 @@ pub enum Token {
     Hash,
     Arrow,
 
-    /// FIXME: Pipe for type conversions is temporary
-    Pipe,
-
     Op(Operation),
 
     Word(String),
@@ -207,7 +204,7 @@ impl Lexer {
                             '=', Some(Token::Op(Operation::LesserOrEquals))
                         ),
                         '&' => then_or!(Some(Token::Op(Operation::AddressOf)), '&', Some(Token::Op(Operation::LogicalAnd))),
-                        '|' => then_or!(Some(Token::Pipe), '|', Some(Token::Op(Operation::LogicalOr))),
+                        '|' => then_or!(None, '|', Some(Token::Op(Operation::LogicalOr))),
                         '^' => then_or!(None, '^', Some(Token::Op(Operation::LogicalXor))),
                         '+' => Some(Token::Op(Operation::Plus)),
                         '*' => Some(Token::Op(Operation::Times)),
