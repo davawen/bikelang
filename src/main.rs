@@ -18,28 +18,34 @@ mod typed;
 #[derive(Parser)]
 struct Args {
     /// Show lexed tokens and exit
-    #[arg(short)]
+    #[arg(short, long)]
     tokens: bool,
-
     /// Show the generated AST
-    #[arg(short)]
+    #[arg(short, long)]
     ast: bool,
-
     /// Show the type analysis
-    #[arg(short = 'z')]
+    #[arg(short = 'z', long)]
     analyze: bool,
-
     /// Show the intermediate representation
-    #[arg(short)]
+    #[arg(short, long)]
     ir: bool,
-
     /// Print the resulting assembly
     #[arg(short = 's')]
     asm: bool,
-    prog: String
+
+    /// Name of the output executable
+    #[arg(short, long)]
+    #[clap(default_value_t = String::from("a.out"))]
+    output: String,
+    /// Don't assemble and link the resulting `out.asm`
+    #[arg(short, long)]
+    nocompile: bool,
+
+    /// File to compile
+    file: String
 }
 
-fn compile(args: Args, source: &str) -> error::Result<String> {
+fn compile(args: &Args, source: &str) -> error::Result<String> {
     let mut lexer = Lexer::new(source);
 
     if args.tokens {
@@ -76,7 +82,7 @@ fn compile(args: Args, source: &str) -> error::Result<String> {
 fn main() {
     let args = Args::parse();
     let source = {
-        let source = String::from_utf8(fs::read(&args.prog).expect("couldn't open file")).expect("invalid utf-8");
+        let source = String::from_utf8(fs::read(&args.file).expect("couldn't open file")).expect("invalid utf-8");
 
         // Very roundabout copy-heavy way to replace tabs with spaces but I couldn't find an easier one :(
         // Needed for nice error messages (need to replace any other multi-width characters)
@@ -90,33 +96,37 @@ fn main() {
         out
     };
 
-    match compile(args, &source) {
+    match compile(&args, &source) {
         Ok(asm) => {
             if asm.is_empty() { return; }
 
             fs::write("out.asm", asm).expect("couldn't write assembly to file");
 
-            println!("$ nasm -f elf64 out.asm");
-            let out = std::process::Command::new("nasm")
-                .args(["-f", "elf64", "out.asm"])
-                .output().expect("failed to execute nasm");
+            if !args.nocompile {
+                println!("$ nasm -f elf64");
+                let out = std::process::Command::new("nasm")
+                    .args(["-f", "elf64", "out.asm"])
+                    .output().expect("failed to execute nasm");
 
-            if !out.status.success() {
-                eprintln!("assembling error:\n{}", String::from_utf8(out.stderr).expect("invalid utf-8"));
-                return;
+                if !out.status.success() {
+                    eprintln!("assembling error:\n{}", String::from_utf8(out.stderr).expect("invalid utf-8"));
+                    return;
+                }
+
+                println!("$ ld");
+                let out = std::process::Command::new("ld")
+                    .args(["out.o", "-o", &args.output])
+                    .output().expect("failed to execute ld");
+
+                if !out.status.success() {
+                    eprintln!("link error:\n{}", String::from_utf8(out.stderr).expect("invalid utf-8"));
+                    return;
+                }
             }
 
-            println!("$ ld out.o");
-            let out = std::process::Command::new("ld")
-                .arg("out.o")
-                .output().expect("failed to execute ld");
+            use utility::color::{ GREEN, WHITE };
 
-            if !out.status.success() {
-                eprintln!("link error:\n{}", String::from_utf8(out.stderr).expect("invalid utf-8"));
-                return;
-            }
-
-            println!("Compilation successful!");
+            println!("{GREEN}compilation successful!{WHITE}");
         }
         Err(e) => {
             e.print(&source);
