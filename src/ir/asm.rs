@@ -317,19 +317,19 @@ impl Instruction {
             Instruction::Intrisic(i) => {
                 i.generate_asm(ir, func)
             }
-            Instruction::Call { func: func_idx, parameters, return_type } => {
-                let param_size = parameters.iter().map(Value::size).sum::<u32>();
+            Instruction::Call { func: func_idx, arguments, return_type } => {
+                let param_size = arguments.iter().map(Value::size).sum::<u32>();
                 let return_size = return_type.size();
 
                 let mut offset = param_size;
-                let offsets = parameters.iter().map(|v| {
+                let offsets = arguments.iter().map(|v| {
                     offset -= v.size();
                     offset
                 }).collect_vec();
 
                 fmtools::format! {
                     "sub rsp, "{param_size + return_size}"\n"
-                    for (p, offset) in parameters.iter().zip(&offsets) {
+                    for (p, offset) in arguments.iter().zip(&offsets) {
                         let size = p.size();
                         "mov "{word_size(size)}" [rsp + "{offset}"], "
                         {p.as_operand(func)}"\n"

@@ -198,11 +198,11 @@ impl Mode for ExpressionMode {
                 let Node::Identifier(name, _) = left.node
                     else { return Err(AstError::ExpectedNode("a function name", left.node)).at(left.bounds)};
 
-                let (parameter_list, rtoken) = argument_list(lexer)?;
+                let (argument_list, rtoken) = argument_list(lexer)?;
                 Node::Call {
                     name,
                     return_type: Type::Void,
-                    parameter_list
+                    argument_list
                 }.ast(left.bounds.with_end_of(rtoken.bounds))
             }
             Hash => {

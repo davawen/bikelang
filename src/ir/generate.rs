@@ -177,12 +177,12 @@ impl Function {
 
                 Value::Register(reg)
             }
-            ast::Node::Call { name, parameter_list, return_type } => {
+            ast::Node::Call { name, argument_list, return_type } => {
                 let idx = app.function_definitions.get_index_of(&name).unwrap();
 
                 let return_size = return_type.size();
-                let parameters: Vec<_> = parameter_list.into_iter().map(|n| self.fold_node(ir, app, _func, scope, n)).collect();
-                for p in &parameters {
+                let arguments: Vec<_> = argument_list.into_iter().map(|n| self.fold_node(ir, app, _func, scope, n)).collect();
+                for p in &arguments {
                     p.free_register(ir);
                 }
 
@@ -194,7 +194,7 @@ impl Function {
                 let call = Instruction::Call {
                     func: idx,
                     return_type,
-                    parameters
+                    arguments
                 };
                 self.instructions.push(call);
 
@@ -374,7 +374,7 @@ impl Function {
             label_num: 0,
         };
 
-        let num_args = definition.arguments.len();
+        let num_args = definition.parameters.len();
         let mut total_offset = 16;
         for (name, v) in definition.variables.iter().take(num_args) {
             let k = this.variables.insert(VariableOffset { size: v.size(), total_offset, argument: true});

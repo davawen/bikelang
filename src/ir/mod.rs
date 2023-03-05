@@ -58,7 +58,7 @@ enum Instruction {
     Intrisic(Intrisic),
     Call {
         func: FunctionIndex,
-        parameters: Vec<Value>,
+        arguments: Vec<Value>,
         return_type: typed::Type
     },
     Ret

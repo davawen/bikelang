@@ -39,9 +39,9 @@ impl Display for Ast {
                 let inner = format!("{value}");
                 ( base, Some(vec![inner]) )
             }
-            Node::Call { name, parameter_list, .. } => {
+            Node::Call { name, argument_list, .. } => {
                 let call = format!("{BLUE}CALL {name}");
-                let params = parameter_list.iter().map(|p| format!("ARG {p}")).collect_vec();
+                let params = argument_list.iter().map(|p| format!("ARG {p}")).collect_vec();
                 ( call, Some(params) )
             }
             Node::Intrisic(i) => match i {

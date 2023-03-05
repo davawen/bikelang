@@ -21,7 +21,7 @@ pub enum Node {
     },
     Call {
         name: String,
-        parameter_list: Vec<Ast>,
+        argument_list: Vec<Ast>,
         return_type: Type
     },
     UnaryExpr {

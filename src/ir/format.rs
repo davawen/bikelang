@@ -116,9 +116,9 @@ impl Instruction {
                 }
             ),
             Intrisic(i) => format!("{PINK}INTRISIC{WHITE} {i}"),
-            Call { func, parameters, return_type: _ } => fmtools::format!(
+            Call { func, arguments, return_type: _ } => fmtools::format!(
                 {BLUE}"CALL "{functions[*func].name}{WHITE}" WITH "
-                for p in parameters {
+                for p in arguments {
                     {p}", "
                 }
             ),

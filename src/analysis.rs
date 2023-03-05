@@ -18,7 +18,7 @@ pub struct App {
 pub struct Function {
     pub return_type: Type,
     pub variables: IndexMap<String, Type>,
-    pub arguments: Vec<VariableIndex>,
+    pub parameters: Vec<VariableIndex>,
     pub body: FunctionBodyIndex,
 }
 
@@ -57,21 +57,21 @@ impl Function {
     /// Inserts a function declaration and body into an app
     fn insert(app: &mut App, definition: Ast) -> Result<()> {
         let Node::FuncDef { name, return_type, parameter_list, box body } = definition.node
-            else { return Err(AnalysisError::WrongNodeType("No function definition given...", definition.node)).at(definition.bounds) };
+            else { return Err(AnalysisError::WrongNodeType("no function definition given", definition.node)).at(definition.bounds) };
 
         let mut variables = IndexMap::new();
-        let mut arguments = Vec::new();
+        let mut parameters = Vec::new();
 
         for v in parameter_list {
             let Node::Definition { name, typename } = v.node
-                else { return Err(AnalysisError::WrongNodeType("An argument definition", v.node)).at(v.bounds) };
+                else { return Err(AnalysisError::WrongNodeType("an argument definition", v.node)).at(v.bounds) };
 
             let (idx, _) = variables.insert_full(name, typename);
-            arguments.push(idx);
+            parameters.push(idx);
         }
 
         let Node::Block(body, _) = body.node 
-            else { return Err(AnalysisError::WrongNodeType("A function body", body.node)).at(body.bounds) };
+            else { return Err(AnalysisError::WrongNodeType("a function body", body.node)).at(body.bounds) };
 
         fn get_variable_definitions(variables: &mut IndexMap<String, Type>, ast: &Ast) -> Result<()> {
             match &ast.node {
@@ -92,7 +92,7 @@ impl Function {
                 Node::Statement(box expr) | Node::Convert(box expr, _) => {
                     get_variable_definitions(variables, expr)?;
                 }
-                Node::Block(body, _) | Node::Call { parameter_list: body, .. } => {
+                Node::Block(body, _) | Node::Call { argument_list: body, .. } => {
                     for expr in body {
                         get_variable_definitions(variables, expr)?;
                     }
@@ -116,7 +116,7 @@ impl Function {
             Self {
                 return_type,
                 variables,
-                arguments,
+                parameters,
                 body,
             },
         );
@@ -181,18 +181,18 @@ impl Ast {
 
                 Ok(Type::Void.into())
             }
-            Node::Call { name, parameter_list, return_type } => {
+            Node::Call { name, argument_list, return_type } => {
                 let func = app.function_definitions.get(name)
                     .ok_or(AnalysisError::Unknown("function", name.clone()))
                     .at(self.bounds)?;
 
-                if func.arguments.len() != parameter_list.len() {
-                    return Err(AnalysisError::WrongArgumentNumber(name.clone(), func.arguments.len(), parameter_list.len()))
+                if func.parameters.len() != argument_list.len() {
+                    return Err(AnalysisError::WrongArgumentNumber(name.clone(), func.parameters.len(), argument_list.len()))
                         .at_ast(self)
                 }
 
-                for (param, arg) in func.arguments.iter().map(|&a| func.variables[a].clone()) // map argument index into type index
-                    .zip(parameter_list.iter_mut())
+                for (param, arg) in func.parameters.iter().map(|&a| func.variables[a].clone()) // map argument index into type index
+                    .zip(argument_list.iter_mut())
                 {
                     let arg_type = arg.set_type(app, definition, Some(&param))?;
                     arg_type.ty.expect_ref(param.into(), "wrong argument type to function").at_ast(arg)?;
@@ -420,7 +420,7 @@ impl Display for App {
                 let is_last = idx == func.variables.len()-1;
                 let connector = if is_last { '╰' } else { '├' };
 
-                let is_argument = if func.arguments.contains(&idx) {
+                let is_argument = if func.parameters.contains(&idx) {
                     "(ARGUMENT)"
                 } else { "" };
 
