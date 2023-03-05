@@ -38,7 +38,8 @@ pub enum Node {
     If {
         condition: Box<Ast>,
         body: Box<Ast>,
-        else_body: Option<Box<Ast>>
+        else_body: Option<Box<Ast>>,
+        ty: Type
     },
     Loop {
         body: Box<Ast>

@@ -122,7 +122,8 @@ impl Mode for ExpressionMode {
                             Node::If {
                                 condition,
                                 body,
-                                else_body: None
+                                else_body: None,
+                                ty: Type::Void
                             }
                         )
                     }
@@ -222,7 +223,7 @@ impl Mode for ExpressionMode {
                 Node::Intrisic(intrisic).ast(left.bounds.with_end_of(rtoken.bounds))
             }
             Keyword(token::Keyword::Else) => {
-                let Node::If { condition, body, else_body: _ } = left.node
+                let Node::If { condition, body, else_body: _, ty } = left.node
                     else { return Err(AstError::ExpectedNode("if condition", left.node)).at(left.bounds) };
 
                 let else_body = match lexer.peek().token {
@@ -233,7 +234,7 @@ impl Mode for ExpressionMode {
                 };
                 Ast::new(
                     left.bounds.with_end_of(else_body.bounds),
-                    Node::If { condition, body, else_body: Some(else_body) }
+                    Node::If { condition, body, else_body: Some(else_body), ty }
                 )
             }
             _ => unreachable!("{item:#?}")

@@ -285,15 +285,22 @@ impl Ast {
 
                 Ok(output.into())
             }
-            Node::If { box condition, box body, else_body } => {
+            Node::If { box condition, box body, else_body, ty } => {
                 let cond_type = condition.set_type(app, definition, None)?;
                 cond_type.expect(Type::Boolean.into(), "if statement condition needs to be boolean").at_ast(condition)?;
 
-                body.set_type(app, definition, None)?;
+                // simple if branches don't return anything
+                // if-else branches have to have matching types
+
+                let body_type = body.set_type(app, definition, expect)?;
                 if let Some(box else_body) = else_body {
-                    else_body.set_type(app, definition, None)?;
+                    let else_type = else_body.set_type(app, definition, expect)?;
+
+                    else_type.expect_ref(body_type.ty.into(), "divergent if statement types").at_ast(else_body)?;
+                    *ty = else_type.ty;
                 }
-                Ok(Type::Void.into())
+
+                Ok(ty.clone().into())
             }
             Node::Loop { box body } => {
                 body.set_type(app, definition, None)?;
@@ -342,7 +349,8 @@ impl Ast {
             Node::Identifier(_, ty) => ty,
             Node::BoolLiteral(_) => &Type::Boolean,
             Node::StringLiteral(_) => return Type::string(),
-            Node::Statement(..) | Node::FuncDef { .. } | Node::Loop { .. } | Node::If { .. }
+            Node::If { ty, .. } => ty,
+            Node::Statement(..) | Node::FuncDef { .. } | Node::Loop { .. }
                 | Node::Return(..) | Node::Break | Node::Intrisic(..) | Node::Empty
                 | Node::Definition { .. } => &Type::Void
         }.clone()

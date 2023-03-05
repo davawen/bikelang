@@ -1,11 +1,21 @@
-func main() {
-	let i32 a = 8;
+func num_state(i32 a) {
+	let i32 state =
+		if a == 9 {
+			print#("a is 9!\n");
+			0
+		} else if a == 8 {
+			print#("a is 8!\n");
+			1
+		} else {
+			print#("a is ", a, "\n");
+			2
+		};
+	
+	print#("State: ", state, "\n");
+}
 
-	if a == 9 {
-		print#("a is 9!\n");
-	} else if a == 8 {
-		print#("a is 8!\n");
-	} else {
-		print#("a is ", a, "\n");
-	};
+func main() {
+	num_state(9);
+	num_state(8);
+	num_state(10);
 }

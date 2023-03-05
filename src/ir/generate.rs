@@ -245,7 +245,7 @@ impl Function {
                 // self.instructions.push(Instruction::Intrisic(Intrisic::from_node(name, parameter_list)?));
                 Value::NoValue
             }
-            ast::Node::If { box condition, box body, else_body } => {
+            ast::Node::If { box condition, box body, else_body, ty } => {
                 let jump_comparison = match condition.node { 
                     ast::Node::Expr { op, ty: _, lhs, rhs} if op.is_comparison() => {
                         let lhs = self.fold_node(ir, app, _func, scope, *lhs);
@@ -269,23 +269,28 @@ impl Function {
                 let end_body_idx = self.add_label();
                 self.instructions.push(Instruction::Jump(end_body_idx, jump_comparison));
 
-                self.fold_node(ir, app, _func, scope, body).free_register(ir);
+                let body_result = self.fold_node(ir, app, _func, scope, body);
 
+                // If there is an else, jump to the end of the branch when you've finished executing the body
                 if let Some(box else_body) = else_body {
-                    // If there is an else, jump to the end of the branch when you've finished executing the body
+                    let reg = body_result.as_register(ir, &mut self.instructions);
+
                     let end_if_idx = self.add_label();
                     self.instructions.push(Instruction::Jump(end_if_idx, Comparison::Unconditional));
 
                     self.instructions.push(Instruction::Label(end_body_idx)); // go here if condition was false
-                    self.fold_node(ir, app, _func, scope, else_body);
+                    let else_result = self.fold_node(ir, app, _func, scope, else_body);
+                    else_result.free_register(ir);
+                    self.instructions.push(Instruction::Load(reg, else_result));
 
                     self.instructions.push(Instruction::Label(end_if_idx));
+
+                    Value::Register(reg)
                 } else {
                     self.instructions.push(Instruction::Label(end_body_idx));
-                }
 
-                
-                Value::NoValue
+                    Value::NoValue
+                }
             }
             ast::Node::Loop { box body } => {
                 let loop_start = self.add_label();

@@ -52,7 +52,7 @@ impl Display for Ast {
                     ( name, Some(params) )
                 }
             }
-            Node::If { condition, body, else_body } => {
+            Node::If { condition, body, else_body, ty: _ } => {
                 let base = format!("{PURPLE}IF");
                 let condition = format!("CONDITION {condition}");
                 let body = format!("BODY {body}");

@@ -144,14 +144,15 @@ You can see more examples in the `progs/` folder.
 - [x] Loops and breaks
 - [x] Pointer operations with `*` and `&`
 - [x] Type conversions with `<type>value`
+- [x] Else condition and if-expressions
 - [ ] Variable scope and shadowing
-- [ ] Else condition and if-expressions
 - [ ] Structs
 - [ ] Type accessors with `::`
 - [ ] Methods and UFCS
 - [ ] Enums and pattern matching
 - [ ] Floating point arithmetic
 - [ ] C FFI
+- [ ] Compile time reflection
 - [ ] Bootstrapped compiler
 
 ## Dependencies
