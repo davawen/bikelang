@@ -225,7 +225,12 @@ impl Mode for ExpressionMode {
                 let Node::If { condition, body, else_body: _ } = left.node
                     else { return Err(AstError::ExpectedNode("if condition", left.node)).at(left.bounds) };
 
-                let else_body = box parse_block(lexer.next(), lexer)?;
+                let else_body = match lexer.peek().token {
+                    Keyword(token::Keyword::If) => {
+                        box pratt(self, lexer, 0)?
+                    },
+                    _ => box parse_block(lexer.next(), lexer)?
+                };
                 Ast::new(
                     left.bounds.with_end_of(else_body.bounds),
                     Node::If { condition, body, else_body: Some(else_body) }

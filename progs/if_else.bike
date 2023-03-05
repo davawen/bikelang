@@ -1,9 +1,11 @@
 func main() {
-	let i32 a = 9;
+	let i32 a = 8;
 
 	if a == 9 {
 		print#("a is 9!\n");
+	} else if a == 8 {
+		print#("a is 8!\n");
 	} else {
-		print#("a is not 9: ", a, "\n");
+		print#("a is ", a, "\n");
 	};
 }
