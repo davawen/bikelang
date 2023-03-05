@@ -2,11 +2,13 @@ use std::collections::HashMap;
 
 use enum_map::{EnumMap, Enum};
 use indexmap::IndexSet;
-use slotmap::SlotMap;
 
 use crate::typed;
 
+use self::scope::{Scope, VariableKey, VariableId};
+
 mod generate;
+mod scope;
 mod asm;
 mod format;
 // mod optimize;
@@ -19,17 +21,18 @@ pub struct Ir {
 }
 
 type FunctionIndex = usize;
-type VariableKey = slotmap::DefaultKey;
 type LiteralIndex = usize;
 type LabelIndex = usize;
 
 #[derive(Debug)]
 struct Function {
     name: String,
-    variables: SlotMap<VariableKey, VariableOffset>,
-    named_variables: HashMap<String, VariableKey>,
-    /// Last variable added to the `variables` slotmap
-    last_variable: Option<VariableKey>,
+    scopes: Vec<Scope>,
+
+    /// Total space the funcction's variables take on the stack
+    stack_offset: u32,
+
+    /// Used to index into the first scope(which holds all the arguments)
     return_variable: Option<VariableKey>,
 
     instructions: Vec<Instruction>,
@@ -66,12 +69,12 @@ enum Instruction {
 
 #[derive(Debug)]
 enum Address {
-    Variable(VariableKey),
+    Variable(VariableId),
     Ptr(Value, u32)
 }
 
-impl From<VariableKey> for Address {
-    fn from(value: VariableKey) -> Self {
+impl From<VariableId> for Address {
+    fn from(value: VariableId) -> Self {
         Address::Variable(value)
     }
 }
@@ -103,7 +106,7 @@ enum Arithmetic {
     Not(Register),
     Negate(Register),
     Deref(Register, u32),
-    AddressOf(Register, VariableKey)
+    AddressOf(Register, VariableId)
 }
 
 #[derive(Debug)]
@@ -147,24 +150,6 @@ enum RegisterKind {
 struct Register {
     pub kind: RegisterKind,
     pub size: u32
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-enum Scope {
-    // Block,
-    // If { end_label: LabelIndex },
-    Loop { /* start_label: LabelIndex, */ end_label: LabelIndex }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct VariableOffset {
-    /// The size of this variable in bytes
-    pub size: u32,
-    /// The total offset of this variable from the stack base
-    pub total_offset: u32,
-    /// Wether this variable is an argument (is it stored in this stack frame or in the parent one)
-    pub argument: bool
 }
 
 impl Value {

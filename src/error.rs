@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{ast::{AstError, self}, typed::TypeError, analysis::AnalysisError, token, utility::Bounds};
+use crate::{ast::{AstError, self, analysis::AnalysisError}, typed::TypeError, token, utility::Bounds};
 
 #[derive(Debug)]
 pub struct CompilerError {

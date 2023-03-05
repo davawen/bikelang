@@ -1,12 +1,16 @@
 use std::{fmt::Display, ops::Not};
 
+use itertools::Itertools;
+
 use super::*;
 use crate::utility::color::*;
 
-fn format_variable(var: VariableKey, variable_names: &HashMap<VariableKey, String>) -> String {
+type ReverseNames<'a> = &'a [HashMap<VariableKey, String>];
+
+fn format_variable(var: &VariableId, variable_names: ReverseNames ) -> String {
     fmtools::format!(
-        "(" {var:?} " "
-        if let Some(name) = variable_names.get(&var) {
+        "(" {var.1:?} " "
+        if let Some(name) = variable_names[var.0].get(&var.1) {
             {GREEN}"\""{name}"\" "{WHITE}
         }
         ")"
@@ -14,10 +18,10 @@ fn format_variable(var: VariableKey, variable_names: &HashMap<VariableKey, Strin
 }
 
 impl Address {
-    fn format(&self, variable_names: &HashMap<VariableKey, String>) -> String {
+    fn format(&self, variable_names: ReverseNames) -> String {
         match self {
             Address::Ptr(ptr, size) => format!("(*{ptr} $ {CYAN}{size} bytes{WHITE})"),
-            Address::Variable(var) => format_variable(*var, variable_names)
+            Address::Variable(var) => format_variable(var, variable_names)
         }
     }
 }
@@ -43,7 +47,7 @@ impl Display for Register {
 }
 
 impl Arithmetic {
-    fn format(&self, variable_names: &HashMap<VariableKey, String>) -> String {
+    fn format(&self, variable_names: ReverseNames) -> String {
         use Arithmetic::*;
         fmtools::format!(
             match self {
@@ -58,7 +62,7 @@ impl Arithmetic {
                 Not(a) => "LOGICAL INVERSE "{a},
                 Negate(a) => "NEGATE "{a},
                 Deref(a, _) => "DEREFERENCE "{a},
-                AddressOf(reg, var) => "PUT ADDRESS OF "{format_variable(*var, variable_names)}" INTO "{reg}
+                AddressOf(reg, var) => "PUT ADDRESS OF "{format_variable(var, variable_names)}" INTO "{reg}
             }
         )
     }
@@ -97,7 +101,7 @@ impl Display for Intrisic {
 }
 
 impl Instruction {
-    fn format(&self, functions: &[Function], variable_names: &HashMap<VariableKey, String>) -> String {
+    fn format(&self, functions: &[Function], variable_names: ReverseNames) -> String {
         use Instruction::*;
         match self {
             VariableStore(var, val) => format!("{YELLOW}STORE{WHITE} {val} INTO {}", var.format(variable_names)),
@@ -134,10 +138,13 @@ impl Display for Ir {
             for func in &self.functions {
                 "FUNCTION "{BLUE}{func.name}{WHITE}"\n"
                 "  VARIABLES:\n"
-                let variables_names = func.named_variables.iter().map(|(a, b)| (*b, a.clone())).collect::<HashMap<_, _>>();
-                for (var, offset) in &func.variables {
+                let variables_names = func.scopes.iter().map(|s| {
+                    s.named_variables.iter().map(|(a, b)| (*b, a.clone())).collect::<HashMap<_, _>>()
+                }).collect_vec();
+
+                for (var, offset) in &func.scopes[0].variables {
                     "    "{GREEN}
-                    if let Some(name) = variables_names.get(&var) {
+                    if let Some(name) = variables_names[0].get(&var) {
                         '"'{name}"\": "
                     }
                     else if Some(var) == func.return_variable {
@@ -147,7 +154,7 @@ impl Display for Ir {
                         {var:?}
                     }
                     {WHITE}
-                    "size: "{CYAN}{offset.size}{WHITE}", offset: "{CYAN}{offset.total_offset}
+                    "size: "{CYAN}{offset.size}{WHITE}", offset: "{CYAN}{offset.offset}
                     if offset.argument {
                         {BLUE}" (argument)"
                     }

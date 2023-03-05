@@ -1,8 +1,6 @@
 use thiserror::Error;
 
-use crate::ast::{Node, UnaryOperation};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     UInt8,
     Int8,
@@ -13,6 +11,7 @@ pub enum Type {
     Float32,
     Boolean,
     Ptr(Box<Type>),
+    #[default]
     Void,
     // For later :)
     // Struct(TypeIndex)

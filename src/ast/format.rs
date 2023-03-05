@@ -24,7 +24,7 @@ impl Display for Ast {
             Node::Statement(inner) => {
                 ( "STATEMENT".to_string(), Some(vec![format!("{inner}")]) )
             }
-            Node::Block(inner, ..) => {
+            Node::Block { inner, .. } => {
                 let inner = inner.iter().map(|p| format!("{p}")).collect_vec();
                 ( format!("{RED}BLOCK"), Some(inner) )
             }

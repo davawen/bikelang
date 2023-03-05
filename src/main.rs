@@ -1,4 +1,4 @@
-#![feature(box_syntax, box_patterns, if_let_guard)]
+#![feature(box_syntax, box_patterns, if_let_guard, default_free_fn, result_option_inspect)]
 
 use std::fs;
 use clap::Parser;
@@ -10,7 +10,6 @@ use crate::{
 mod utility;
 mod error;
 mod ast;
-mod analysis;
 mod ir;
 mod token;
 mod typed;
@@ -63,7 +62,7 @@ fn compile(args: &Args, source: &str) -> error::Result<String> {
 
     if args.ast { println!("{ast}") }
 
-    let mut app = analysis::App::new();
+    let mut app = ast::analysis::App::new();
 
     app.insert_declarations(ast)?;
     let app = app.type_check()?;

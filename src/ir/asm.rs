@@ -12,13 +12,13 @@ fn word_size(size: u32) -> &'static str {
     }
 }
 
-fn variable_operand(func: &Function, key: VariableKey) -> String {
-    let var = &func.variables[key];
+fn variable_operand(func: &Function, key: VariableId) -> String {
+    let var = &func.scopes[key.0].variables[key.1];
     format!(
         "{} [rbp{}{}]",
         word_size(var.size),
         if var.argument { '+' } else { '-' },
-        var.total_offset
+        var.offset
     )
 }
 
@@ -353,7 +353,7 @@ impl Function {
     sub rsp, {}
 \n", 
             self.name,
-            self.last_variable.map_or(0, |v| self.variables[v].total_offset)
+            self.stack_offset
         );
 
         for (idx, ins) in self.instructions.iter().enumerate() {

@@ -1,0 +1,18 @@
+func main() {
+	let i32 function = 10;
+	// 4 bytes -> offset 0
+
+	{
+		// 0 bytes -> 4 bytes
+
+		{
+			let i32 inner = 2;
+			// 4 bytes -> 4 bytes
+		}
+
+		let i32 inner = 5;
+
+		// 4 bytes -> 4 bytes
+	}
+	
+}

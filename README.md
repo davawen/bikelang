@@ -5,6 +5,7 @@ A toy x86_64 compiler for a toy language.
 ## Get started
 
 To get started with the compiler:
+-   Make sure you have the nightly rust toolchain installed
 -   Clone this repository
 -   Build it with `cargo build --release`
 -   Run the executable `./target/release/bikelang` with this file:
