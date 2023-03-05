@@ -29,6 +29,7 @@ impl Mode for ExpressionMode {
             }
             Paren(Dir::Left) => 70, // operator ()
             Hash => 70,
+            Keyword(token::Keyword::Else) => 70, // bind elses to if-s;
             Brace(Dir::Left) => 1, // allow stopping at opening brace
             Paren(Dir::Right) | Brace(Dir::Right) | Keyword(_) | Comma | Semicolon | Eof => 0,
             token => return Err(AstError::UnexpectedToken("unbindable token used infix", token.clone())).at_item(item)
@@ -102,7 +103,7 @@ impl Mode for ExpressionMode {
                             Type::Void
                         };
 
-                        let body = box pratt(self, lexer, 0)?;
+                        let body = box parse_block(lexer.next(), lexer)?;
                         Ast::new(
                             item.bounds.with_end_of(body.bounds),
                             Node::FuncDef {
@@ -115,17 +116,18 @@ impl Mode for ExpressionMode {
                     }
                     If => {
                         let condition = box pratt(self, lexer, 1)?;
-                        let body = box pratt(self, lexer, 0)?;
+                        let body = box parse_block(lexer.next(), lexer)?;
                         Ast::new(
                             item.bounds.with_end_of(body.bounds),
                             Node::If {
                                 condition,
-                                body
+                                body,
+                                else_body: None
                             }
                         )
                     }
                     Loop => {
-                        let body = box pratt(self, lexer, 0)?;
+                        let body = box parse_block(lexer.next(), lexer)?;
                         Ast::new(
                             item.bounds.with_end_of(body.bounds),
                             Node::Loop {
@@ -139,7 +141,8 @@ impl Mode for ExpressionMode {
                         Ast::new(item.bounds.with_end_of(expr.bounds), Node::Return(expr))
                     }
                     True => Ast::new(item.bounds, Node::BoolLiteral(true)),
-                    False => Ast::new(item.bounds, Node::BoolLiteral(false))
+                    False => Ast::new(item.bounds, Node::BoolLiteral(false)),
+                    Else => return Err(AstError::UnexpectedToken("missing an if clause before else", Keyword(keyword))).at(item.bounds)
                 }
             }
             Paren(Dir::Left) => { // parenthesis for grouping operations
@@ -149,8 +152,7 @@ impl Mode for ExpressionMode {
                 inner.extend(item.bounds.with_end_of(rparen.bounds))
             }
             Brace(Dir::Left) => {
-                let (inner, rtoken) = parse_block(lexer)?;
-                Node::Block(inner, Type::Void).ast(item.bounds.with_end_of(rtoken.bounds))
+                parse_block(item, lexer)?
             }
             Semicolon => Node::Empty.ast_from(item),
             _ => unreachable!("{item:#?}")
@@ -205,7 +207,7 @@ impl Mode for ExpressionMode {
                     argument_list
                 }.ast(left.bounds.with_end_of(rtoken.bounds))
             }
-            Hash => {
+            Hash => { // intrisic 'function call'
                 let Node::Identifier(name, _) = left.node
                     else { return Err(AstError::ExpectedNode("an intrisic name", left.node)).at(left.bounds) };
 
@@ -218,6 +220,16 @@ impl Mode for ExpressionMode {
                     _ => return Err(AstError::UnknownIntrisic(name)).at(left.bounds)
                 };
                 Node::Intrisic(intrisic).ast(left.bounds.with_end_of(rtoken.bounds))
+            }
+            Keyword(token::Keyword::Else) => {
+                let Node::If { condition, body, else_body: _ } = left.node
+                    else { return Err(AstError::ExpectedNode("if condition", left.node)).at(left.bounds) };
+
+                let else_body = box parse_block(lexer.next(), lexer)?;
+                Ast::new(
+                    left.bounds.with_end_of(else_body.bounds),
+                    Node::If { condition, body, else_body: Some(else_body) }
+                )
             }
             _ => unreachable!("{item:#?}")
         };
@@ -328,7 +340,19 @@ fn argument_list(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
     Ok((list, lexer.expect(Token::Paren(Dir::Right))?))
 }
 
-fn parse_block(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
+/// Parses a block and returns an Ast::Block
+fn parse_block(start_brace: Item, lexer: &mut Lexer) -> Result<Ast> {
+    if start_brace.token != Token::Brace(Dir::Left) {
+        return Err(AstError::ExpectedToken(Token::Brace(Dir::Left), start_brace.token)).at(start_brace.bounds)
+    }
+
+    let (inner, rtoken) = parse_block_vec(lexer)?;
+    Ok(Node::Block(inner, Type::Void).ast(start_brace.bounds.with_end_of(rtoken.bounds)))
+}
+
+/// Parses a block including its ending brace
+/// Returns the list of expressions inside of it, as well as its closing brace for bounds check
+fn parse_block_vec(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
     let mut block = Vec::new();
     while lexer.peek().token != Token::Brace(Dir::Right) {
         let expr = pratt(&ExpressionMode, lexer, 0)?;

@@ -1,0 +1,9 @@
+func main() {
+	let i32 a = 9;
+
+	if a == 9 {
+		print#("a is 9!\n");
+	} else {
+		print#("a is not 9: ", a, "\n");
+	};
+}

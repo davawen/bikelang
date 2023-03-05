@@ -245,10 +245,8 @@ impl Function {
                 // self.instructions.push(Instruction::Intrisic(Intrisic::from_node(name, parameter_list)?));
                 Value::NoValue
             }
-            ast::Node::If { box condition, box body } => {
-                let idx = self.add_label();
-
-                let jump = match condition.node { 
+            ast::Node::If { box condition, box body, else_body } => {
+                let jump_comparison = match condition.node { 
                     ast::Node::Expr { op, ty: _, lhs, rhs} if op.is_comparison() => {
                         let lhs = self.fold_node(ir, app, _func, scope, *lhs);
                         let rhs = self.fold_node(ir, app, _func, scope, *rhs);
@@ -268,12 +266,24 @@ impl Function {
                     }
                 };
 
-                let scope = &[scope, &[Scope::If { end_label: idx }]].concat();
-
-                self.instructions.push(Instruction::Jump(idx, jump));
+                let end_body_idx = self.add_label();
+                self.instructions.push(Instruction::Jump(end_body_idx, jump_comparison));
 
                 self.fold_node(ir, app, _func, scope, body).free_register(ir);
-                self.instructions.push(Instruction::Label(idx));
+
+                if let Some(box else_body) = else_body {
+                    // If there is an else, jump to the end of the branch when you've finished executing the body
+                    let end_if_idx = self.add_label();
+                    self.instructions.push(Instruction::Jump(end_if_idx, Comparison::Unconditional));
+
+                    self.instructions.push(Instruction::Label(end_body_idx)); // go here if condition was false
+                    self.fold_node(ir, app, _func, scope, else_body);
+
+                    self.instructions.push(Instruction::Label(end_if_idx));
+                } else {
+                    self.instructions.push(Instruction::Label(end_body_idx));
+                }
+
                 
                 Value::NoValue
             }
@@ -281,7 +291,7 @@ impl Function {
                 let loop_start = self.add_label();
                 let loop_end = self.add_label();
 
-                let scope = &[scope, &[Scope::Loop { start_label: loop_start, end_label: loop_end }]].concat();
+                let scope = &[scope, &[Scope::Loop { end_label: loop_end }]].concat();
 
                 self.instructions.push(Instruction::Label(loop_start));
                 self.fold_node(ir, app, _func, scope, body).free_register(ir);
@@ -310,7 +320,7 @@ impl Function {
                 Value::NoValue
             }
             ast::Node::Block(nodes, _) => {
-                let scope = &[scope, &[Scope::Block]].concat();
+                // let scope = &[scope, &[Scope::Block]].concat();
                 let mut it = nodes.into_iter().peekable();
                 while let Some(node) = it.next() {
                     if it.peek().is_none() { // if last node

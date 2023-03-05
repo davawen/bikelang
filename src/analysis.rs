@@ -285,11 +285,14 @@ impl Ast {
 
                 Ok(output.into())
             }
-            Node::If { box condition, box body } => {
+            Node::If { box condition, box body, else_body } => {
                 let cond_type = condition.set_type(app, definition, None)?;
                 cond_type.expect(Type::Boolean.into(), "if statement condition needs to be boolean").at_ast(condition)?;
 
                 body.set_type(app, definition, None)?;
+                if let Some(box else_body) = else_body {
+                    else_body.set_type(app, definition, None)?;
+                }
                 Ok(Type::Void.into())
             }
             Node::Loop { box body } => {

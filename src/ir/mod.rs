@@ -152,9 +152,9 @@ struct Register {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum Scope {
-    Block,
-    If { end_label: LabelIndex },
-    Loop { start_label: LabelIndex, end_label: LabelIndex }
+    // Block,
+    // If { end_label: LabelIndex },
+    Loop { /* start_label: LabelIndex, */ end_label: LabelIndex }
 }
 
 #[derive(Debug, Clone, Copy)]

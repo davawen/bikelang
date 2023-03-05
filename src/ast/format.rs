@@ -52,11 +52,14 @@ impl Display for Ast {
                     ( name, Some(params) )
                 }
             }
-            Node::If { condition, body } => {
+            Node::If { condition, body, else_body } => {
                 let base = format!("{PURPLE}IF");
                 let condition = format!("CONDITION {condition}");
                 let body = format!("BODY {body}");
-                ( base, Some(vec![condition, body]) )
+                let else_body = if let Some(else_body) = else_body {
+                    format!("ELSE {else_body}")
+                } else { String::new() };
+                ( base, Some(vec![condition, body, else_body]) )
             }
             Node::Loop { body } => {
                 let base = format!("{PURPLE}LOOP");
