@@ -372,11 +372,15 @@ impl Function {
     }
 
     fn new(name: String, definition: &mut analysis::Function) -> Self {
-        // Move definition scopes
-        let mut ast_scopes = std::mem::replace(&mut definition.scopes, Vec::new())
-            .into_iter().enumerate();
+        // Translate definition scopes into ir scopes
+        let ast_scopes = std::mem::replace(&mut definition.scopes, Vec::new());
 
-        let mut scopes = Vec::new();
+        // Calculate maximum stack offset
+        let stack_offset = ast_scopes[1..].iter().map(|s| s.offset + s.size).max().unwrap();
+
+        let mut ast_scopes = ast_scopes.into_iter().enumerate();
+
+        let mut scopes = Vec::with_capacity(ast_scopes.len());
 
         let (_, parameter_scope) = ast_scopes.next().unwrap();
         let parameter_offset = parameter_scope.size + 16;
@@ -397,7 +401,7 @@ impl Function {
         Self {
             name,
             scopes,
-            stack_offset: 0,
+            stack_offset,
             return_variable,
             instructions: Vec::new(),
             label_num: 0,

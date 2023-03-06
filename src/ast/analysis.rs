@@ -64,9 +64,10 @@ impl Function {
             let Node::Definition { name, typename } = v.node
                 else { return Err(AnalysisError::WrongNodeType("an argument definition", v.node)).at(v.bounds) };
 
-            let idx = parameter_scope.insert(name, typename);
+            parameter_scope.insert(name, typename);
         }
         parameter_scope.size = 0; // aligns subsequent scopes for ir generation
+        parameter_scope.offset = 0;
 
         let mut scopes = vec![parameter_scope];
 
@@ -77,7 +78,7 @@ impl Function {
                     if scopes[scope].has(name, scopes) {
                         return Err(AnalysisError::Redefinition("variable", name.clone())).at_ast(ast);
                     } 
-                    scopes[scope].variables.insert(name.clone(), typename.clone());
+                    scopes[scope].insert(name.clone(), typename.clone());
                 }
                 // New scope
                 Node::Block { inner, scope: new_scope, ty: _ } => {
@@ -461,6 +462,8 @@ impl Display for App {
                     write!(f, "  {GRAY}{separator} {WHITE}{line}")?;
                 }
             }
+
+            writeln!(f, "  {:#?}", func.scopes)?;
 
             writeln!(f)?;
         }

@@ -6,13 +6,16 @@ func main() {
 		// 0 bytes -> 4 bytes
 
 		{
-			let i32 inner = 2;
+			let i8 inner = 2;
 			// 4 bytes -> 4 bytes
-		}
+		};
 
 		let i32 inner = 5;
 
+		print#("inner: ", inner, "\n");
 		// 4 bytes -> 4 bytes
-	}
+	};
+
+	print#("function: ", function, "\n");
 	
 }

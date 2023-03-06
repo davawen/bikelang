@@ -15,7 +15,7 @@ pub struct Scope {
     pub childs: Vec<ScopeIndex>,
     /// Size in bytes this scope occupies
     pub size: u32,
-    /// Offset from the base of the stack (sum of the size of previous scopes)
+    /// Offset from the base of the stack (sum of the size of previous scopes) not including itself
     pub offset: u32
 }
 
@@ -64,11 +64,9 @@ impl Scope {
             let old_size = x.size();
 
             self.size -= old_size;
-            self.offset -= old_size;
         });
 
         self.size += new_size;
-        self.offset += new_size;
 
         idx
     }

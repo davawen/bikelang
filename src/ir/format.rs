@@ -9,13 +9,17 @@ type ReverseNames<'a> = &'a [HashMap<VariableKey, String>];
 
 fn format_variable(var: &VariableId, variable_names: ReverseNames ) -> String {
     fmtools::format!(
-        "(" {var.1:?} " "
+        "(" {var:?} " "
         if let Some(name) = variable_names[var.0].get(&var.1) {
             {GREEN}"\""{name}"\" "{WHITE}
         }
         ")"
     )
 }
+
+// fn format_scope(scope: &Scope, scopes: &[Scope]) -> String {
+//     scope.variables
+// }
 
 impl Address {
     fn format(&self, variable_names: ReverseNames) -> String {
@@ -138,6 +142,7 @@ impl Display for Ir {
             for func in &self.functions {
                 "FUNCTION "{BLUE}{func.name}{WHITE}"\n"
                 "  VARIABLES:\n"
+                {func.scopes:#?}
                 let variables_names = func.scopes.iter().map(|s| {
                     s.named_variables.iter().map(|(a, b)| (*b, a.clone())).collect::<HashMap<_, _>>()
                 }).collect_vec();
