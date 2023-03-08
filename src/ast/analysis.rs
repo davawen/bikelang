@@ -6,7 +6,7 @@ use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
 use crate::{utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType, TypeDescriptor}, super_type_or, error::{Result, ToCompilerError}, };
-use super::{Ast, node::{Node, Intrisic, BinaryOperation, UnaryOperation}, scope::{Scope, ScopeIndex} };
+use super::{Ast, node::{Node, Intrisic, BinaryOperation, UnaryOperation}, scope::{Scope, ScopeStack} };
 
 #[derive(Debug)]
 pub struct App {
@@ -17,8 +17,8 @@ pub struct App {
 
 #[derive(Debug)]
 pub struct Function {
+    pub parameters: Vec<(String, Type)>,
     pub return_type: Type,
-    pub scopes: Vec<Scope>,
     pub body: FunctionBodyIndex,
 }
 
@@ -58,63 +58,15 @@ impl Function {
         let Node::FuncDef { name, return_type, parameter_list, box mut body } = definition.node
             else { return Err(AnalysisError::WrongNodeType("no function definition given", definition.node)).at(definition.bounds) };
 
-        let mut parameter_scope = Scope::new();
+        let parameters =  parameter_list.into_iter().map(|p| {
+            if let Node::Definition { name, typename } = p.node {
+                Ok((name, typename))
+            } else { 
+                Err(AnalysisError::WrongNodeType("an argument definition", p.node)).at(p.bounds)
+            }
+        }).collect::<Result<_>>()?;
 
-        for v in parameter_list {
-            let Node::Definition { name, typename } = v.node
-                else { return Err(AnalysisError::WrongNodeType("an argument definition", v.node)).at(v.bounds) };
-
-            parameter_scope.insert(name, typename);
-        }
-        parameter_scope.size = 0; // aligns subsequent scopes for ir generation
-        parameter_scope.offset = 0;
-
-        let mut scopes = vec![parameter_scope];
-
-        fn get_variable_definitions(scopes: &mut Vec<Scope>, scope: ScopeIndex, ast: &mut Ast) -> Result<()> {
-            match &mut ast.node {
-                // Add new variable
-                Node::Definition { name, typename } => {
-                    if scopes[scope].has(name, scopes) {
-                        return Err(AnalysisError::Redefinition("variable", name.clone())).at_ast(ast);
-                    } 
-                    scopes[scope].insert(name.clone(), typename.clone());
-                }
-                // New scope
-                Node::Block { inner, scope: new_scope, ty: _ } => {
-                    *new_scope = scopes.push_idx(Scope::with_parent(scope, scopes));
-                    scopes[scope].childs.push(*new_scope);
-
-                    for expr in inner {
-                        get_variable_definitions(scopes, *new_scope, expr)?;
-                    }
-                }
-                Node::UnaryExpr { value, .. } => {
-                    get_variable_definitions(scopes, scope, value)?;
-                }
-                Node::Expr { lhs, rhs, .. } => {
-                    get_variable_definitions(scopes, scope, lhs)?;
-                    get_variable_definitions(scopes, scope, rhs)?;
-                }
-                Node::Statement(box expr) | Node::Convert(box expr, _) => {
-                    get_variable_definitions(scopes, scope, expr)?;
-                }
-                Node::Call { argument_list: body, .. } => {
-                    for expr in body {
-                        get_variable_definitions(scopes, scope, expr)?;
-                    }
-                }
-                Node::If { box body, .. } | Node::Loop { box body } | Node::Return(box body) => {
-                    get_variable_definitions(scopes, scope, body)?;
-                }
-                Node::FuncDef { .. } | Node::Break | Node::Intrisic(_) | Node::Identifier(..) | Node::Number(..) | Node::StringLiteral(_) | Node::BoolLiteral(_) | Node::Empty => ()
-            };
-            Ok(())
-        }
-
-        get_variable_definitions(&mut scopes, 0, &mut body)?;
-
-        let Node::Block { inner: body, scope: _, ty: _ } = body.node 
+        let Node::Block { inner: body, ty: _ } = body.node 
             else { return Err(AnalysisError::WrongNodeType("a function body", body.node)).at(body.bounds) };
 
         let body = app.function_bodies.push_idx(FunctionBody{ body, definition: 0 });
@@ -122,8 +74,8 @@ impl Function {
         let (definition, _) = app.function_definitions.insert_full(
             name,
             Self {
+                parameters,
                 return_type,
-                scopes,
                 body,
             },
         );
@@ -140,7 +92,7 @@ impl Ast {
     /// * `app`: Global application state (functions and types)
     /// * `definition`: Definition of the current function
     /// * `expect`: Type that's expected from the node, for simple coercions
-    pub fn set_type(&mut self, app: &App, definition: &Function, scope: &Scope, expect: Option<&Type>) -> Result<TypeDescriptor> {
+    pub fn set_type(&mut self, app: &App, definition: &Function, scopes: &mut ScopeStack, expect: Option<&Type>) -> Result<TypeDescriptor> {
         match &mut self.node {
             Node::Number(value, ty) => {
                 *ty = Type::Int32;
@@ -159,13 +111,18 @@ impl Ast {
             Node::StringLiteral(_) => Ok(Type::string().into()),
             Node::BoolLiteral(_) => Ok(Type::Boolean.into()),
             Node::Identifier(name, typename) => {
-                *typename = scope.get(name, &definition.scopes).cloned()
+                *typename = scopes.get(name).cloned()
                     .ok_or(AnalysisError::Unknown("variable", name.to_owned()))
                     .at(self.bounds)?;
 
                 Ok(typename.clone().addressable())
             }
-            Node::Definition { name: _, typename } => Ok(typename.clone().addressable()),
+            // This place defines variables in the scope!
+            Node::Definition { name, typename } => {
+                scopes.insert(name.clone(), typename.clone());
+
+                Ok(typename.clone().addressable())
+            },
             Node::Intrisic(intrisic) => {
                 match intrisic {
                     Intrisic::Asm(box x) => {
@@ -175,7 +132,7 @@ impl Ast {
                         }
                     },
                     Intrisic::Print(args) => {
-                        for (bounds, ty) in args.iter_mut().map(|node| (node.bounds, node.set_type(app, definition, scope, None))) {
+                        for (bounds, ty) in args.iter_mut().map(|node| (node.bounds, node.set_type(app, definition, scopes, None))) {
                             let ty = ty?;
                             ty.expect_ref(
                                 super_type_or!(Type::string(), SuperType::Integer),
@@ -192,15 +149,15 @@ impl Ast {
                     .ok_or(AnalysisError::Unknown("function", name.clone()))
                     .at(self.bounds)?;
 
-                let parameters = &func.scopes[0].variables;
+                let parameters = &func.parameters;
                 if parameters.len() != argument_list.len() {
                     return Err(AnalysisError::WrongArgumentNumber(name.clone(), parameters.len(), argument_list.len()))
                         .at_ast(self)
                 }
 
-                for (param, arg) in parameters.values().cloned().zip(argument_list.iter_mut())
+                for (param, arg) in parameters.iter().map(|(_, b)| b).cloned().zip(argument_list.iter_mut())
                 {
-                    let arg_type = arg.set_type(app, definition, scope, Some(&param))?;
+                    let arg_type = arg.set_type(app, definition, scopes, Some(&param))?;
                     arg_type.ty.expect_ref(param.into(), "wrong argument type to function").at_ast(arg)?;
                 }
 
@@ -208,7 +165,7 @@ impl Ast {
                 Ok(func.return_type.clone().into())
             }
             Node::UnaryExpr { op, ty, value } => {
-                let value = value.set_type(app, definition, scope, expect)?;
+                let value = value.set_type(app, definition, scopes, expect)?;
 
                 use UnaryOperation::*;
                 let descriptor = match op {
@@ -228,15 +185,14 @@ impl Ast {
                 Ok(descriptor)
             }
             Node::Expr { op: BinaryOperation::Assignment, ty: _, box lhs, box rhs } => {
-                match &lhs.node {
-                    Node::Identifier(..) | Node::Definition { .. } | Node::UnaryExpr { op: UnaryOperation::Deref, .. } => (),
-                    node => {
-                        return Err(AnalysisError::WrongNodeType("given node isn't assignable to", node.clone())).at_ast(lhs);
-                    }
+                let expected_type = lhs.set_type(app, definition, scopes, None)?;
+
+                // Can't assign to r-value
+                if !expected_type.has_address {
+                    return Err(AnalysisError::WrongNodeType("given node isn't assignable to", lhs.node.clone())).at_ast(lhs);
                 }
 
-                let expected_type = lhs.set_type(app, definition, scope, None)?;
-                let rhs_type = rhs.set_type(app, definition, scope, Some(&expected_type.ty))?;
+                let rhs_type = rhs.set_type(app, definition, scopes, Some(&expected_type.ty))?;
 
                 rhs_type.expect(expected_type.ty.into(), "cannot assign value to variable").at_ast(rhs)?;
                 Ok(Type::Void.into())
@@ -245,8 +201,8 @@ impl Ast {
                 use BinaryOperation::*;
                 let descriptor = match op {
                     Add | Sub | Div | Mul | Modulus => {
-                        let left = lhs.set_type(app, definition, scope, expect)?;
-                        let right = rhs.set_type(app, definition, scope, expect)?;
+                        let left = lhs.set_type(app, definition, scopes, expect)?;
+                        let right = rhs.set_type(app, definition, scopes, expect)?;
 
                         left.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers").at_ast(lhs)?;
                         right.expect_ref(super_type_or!(SuperType::Number, SuperType::Ptr), "math operations only apply to numbers").at_ast(rhs)?;
@@ -263,15 +219,15 @@ impl Ast {
                         
                     }
                     Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => {
-                        let left = lhs.set_type(app, definition, scope, None)?;
-                        let right = rhs.set_type(app, definition, scope, Some(&left.ty))?;
+                        let left = lhs.set_type(app, definition, scopes, None)?;
+                        let right = rhs.set_type(app, definition, scopes, Some(&left.ty))?;
 
                         right.expect(left.ty.into(), "cannot compare different types").at(self.bounds)?;
                         Type::Boolean.into()
                     }
                     LogicalAnd | LogicalOr | LogicalXor => {
-                        let left = lhs.set_type(app, definition, scope, Some(&Type::Boolean))?;
-                        let right = rhs.set_type(app, definition, scope, Some(&Type::Boolean))?;
+                        let left = lhs.set_type(app, definition, scopes, Some(&Type::Boolean))?;
+                        let right = rhs.set_type(app, definition, scopes, Some(&Type::Boolean))?;
 
                         left.expect(Type::Boolean.into(), "logical operations only apply to booleans").at_ast(lhs)?;
                         right.expect(Type::Boolean.into(), "logical operations only apply to booleans").at_ast(rhs)?
@@ -283,7 +239,7 @@ impl Ast {
                 Ok(descriptor)
             }
             Node::Convert(box expr, ty) => {
-                let expr_type = expr.set_type(app, definition, scope, Some(ty))?;
+                let expr_type = expr.set_type(app, definition, scopes, Some(ty))?;
 
                 let output = ty.clone(); // Weird ownership shit?
 
@@ -292,15 +248,15 @@ impl Ast {
                 Ok(output.into())
             }
             Node::If { box condition, box body, else_body, ty } => {
-                let cond_type = condition.set_type(app, definition, scope, None)?;
+                let cond_type = condition.set_type(app, definition, scopes, None)?;
                 cond_type.expect(Type::Boolean.into(), "if statement condition needs to be boolean").at_ast(condition)?;
 
                 // simple if branches don't return anything
                 // if-else branches have to have matching types
 
-                let body_type = body.set_type(app, definition, scope, expect)?;
+                let body_type = body.set_type(app, definition, scopes, expect)?;
                 if let Some(box else_body) = else_body {
-                    let else_type = else_body.set_type(app, definition, scope, expect)?;
+                    let else_type = else_body.set_type(app, definition, scopes, expect)?;
 
                     else_type.expect_ref(body_type.ty.into(), "divergent if statement types").at_ast(else_body)?;
                     *ty = else_type.ty;
@@ -309,12 +265,12 @@ impl Ast {
                 Ok(ty.clone().into())
             }
             Node::Loop { box body } => {
-                body.set_type(app, definition, scope, None)?;
+                body.set_type(app, definition, scopes, None)?;
                 Ok(Type::Void.into())
             }
             Node::Break => Ok(Type::Void.into()),
             Node::Return( box expr ) => {
-                let out = expr.set_type(app, definition, scope, Some(&definition.return_type))?;
+                let out = expr.set_type(app, definition, scopes, Some(&definition.return_type))?;
                 out.expect(
                     definition.return_type.clone().into(),
                     "return type doesn't correspond to the given function"
@@ -322,19 +278,23 @@ impl Ast {
 
                 Ok(Type::Void.into())
             }
-            Node::Block { inner: body, scope: inner_scope, ty } => {
-                let inner_scope = &definition.scopes[*inner_scope];
+            // Creates new scopes
+            Node::Block { inner: body, ty } => {
+                scopes.push(Scope::default());
+
                 if let Some((last, body)) = body.split_last_mut() {
                     for node in body {
-                        node.set_type(app, definition, inner_scope, None)?;
+                        node.set_type(app, definition, scopes, None)?;
                     }
-                    *ty = last.set_type(app, definition, inner_scope, expect)?.ty;
+                    *ty = last.set_type(app, definition, scopes, expect)?.ty;
                 }
+
+                scopes.pop();
 
                 Ok(ty.clone().into()) 
             }
             Node::Statement( inner ) => {
-                inner.set_type(app, definition, scope, None)?;
+                inner.set_type(app, definition, scopes, None)?;
                 Ok(Type::Void.into())
             }
             Node::Empty => Ok(Type::Void.into()),
@@ -349,7 +309,7 @@ impl Ast {
             Node::Call { return_type, .. } => return_type,
             Node::UnaryExpr { ty, .. } => ty,
             Node::Expr { ty, .. } => ty,
-            Node::Block { inner: _, scope: _, ty } => ty,
+            Node::Block { inner: _, ty } => ty,
             Node::Convert(_, ty) => ty,
             Node::Number(_, ty) => ty,
             Node::Identifier(_, ty) => ty,
@@ -365,9 +325,16 @@ impl Ast {
 
 impl FunctionBody {
     fn type_check(&mut self, app: &App) -> Result<()> {
+        let definition = &app.function_definitions[self.definition];
+
+        let mut stack = ScopeStack::from_top(
+            Scope {
+                variables: IndexMap::from_iter(definition.parameters.iter().cloned())
+            }
+        );
+
         for statement in self.body.iter_mut() {
-            let definition = &app.function_definitions[self.definition];
-            statement.set_type(app, definition, &definition.scopes[1], None)?;
+            statement.set_type(app, definition, &mut stack, None)?;
         }
         Ok(())
     }
@@ -391,7 +358,7 @@ impl App {
     }
 
     pub fn insert_declarations(&mut self, root: Ast) -> Result<()> {
-        let Node::Block { inner: root, scope: _global_scope, ty: _ } = root.node
+        let Node::Block { inner: root, ty: _ } = root.node
             else { return Err(AnalysisError::WrongNodeType("A list of top-level statements", root.node.clone())).at_ast(&root) };
 
         for statement in root {
@@ -434,7 +401,7 @@ impl Display for App {
                 writeln!(f, "{GRAY}├ {WHITE}RETURNS -> {CYAN}{:?}", func.return_type)?;
             }
             writeln!(f, "{GRAY}├ {WHITE}PARAMETERS")?;
-            let parameters = &func.scopes[0].variables;
+            let parameters = &func.parameters;
             for (idx, (name, ty)) in parameters.iter().enumerate() {
                 let is_last = idx == parameters.len()-1;
                 let connector = if is_last { '╰' } else { '├' };
@@ -462,8 +429,6 @@ impl Display for App {
                     write!(f, "  {GRAY}{separator} {WHITE}{line}")?;
                 }
             }
-
-            writeln!(f, "  {:#?}", func.scopes)?;
 
             writeln!(f)?;
         }

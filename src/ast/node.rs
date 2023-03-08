@@ -44,7 +44,6 @@ pub enum Node {
     Empty,
     Block { 
         inner: Vec<Ast>,
-        scope: ScopeIndex,
         ty: Type
     },
     Number(i64, Type),
