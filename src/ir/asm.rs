@@ -12,13 +12,17 @@ fn word_size(size: u32) -> &'static str {
     }
 }
 
-fn variable_operand(func: &Function, key: VariableId) -> String {
-    let var = &func.scopes[key.0].variables[key.1];
-    format!(
-        "{} [rbp{}{}]",
-        word_size(var.size),
-        if var.argument { '+' } else { '-' },
-        var.offset
+fn variable_operand(func: &Function, var: VariableOffset) -> String {
+    // let var = &func.scopes[key.0].variables[key.1];
+    fmtools::format!(
+        {word_size(var.size)} " "
+        "[rbp"
+        if var.argument {
+            '+' {var.offset}
+        } else {
+            '-' {var.offset + var.size}
+        }
+        "]"
     )
 }
 

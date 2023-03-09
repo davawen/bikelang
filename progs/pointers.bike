@@ -1,11 +1,11 @@
 func putc(u8 char) -> u8 {
 	let u8 val = char; // no optimization >:(
 	asm#("
-	mov rax, 1
-	mov rdi, 1
-	mov rsi, rsp
-	mov rdx, 1
-	syscall
+mov rax, 1
+mov rdi, 1
+mov rsi, rsp
+mov rdx, 1
+syscall
 	")
 
 	return val;

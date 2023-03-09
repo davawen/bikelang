@@ -5,7 +5,7 @@ use indexmap::IndexSet;
 
 use crate::typed;
 
-use self::scope::{Scope, VariableKey, VariableId};
+use self::scope::{Scope, VariableKey, VariableId, VariableOffset};
 
 mod generate;
 mod scope;
@@ -27,9 +27,8 @@ type LabelIndex = usize;
 #[derive(Debug)]
 struct Function {
     name: String,
-    scopes: Vec<Scope>,
 
-    /// Total space the funcction's variables take on the stack
+    /// Total space the function's variables take on the stack
     stack_offset: u32,
 
     /// Used to index into the first scope(which holds all the arguments)
@@ -69,13 +68,19 @@ enum Instruction {
 
 #[derive(Debug)]
 enum Address {
-    Variable(VariableId),
+    Variable(VariableOffset),
     Ptr(Value, u32)
 }
 
-impl From<VariableId> for Address {
-    fn from(value: VariableId) -> Self {
+impl From<VariableOffset> for Address {
+    fn from(value: VariableOffset) -> Self {
         Address::Variable(value)
+    }
+}
+
+impl From<&VariableOffset> for Address {
+    fn from(value: &VariableOffset) -> Self {
+        Address::Variable(*value)
     }
 }
 
@@ -106,7 +111,7 @@ enum Arithmetic {
     Not(Register),
     Negate(Register),
     Deref(Register, u32),
-    AddressOf(Register, VariableId)
+    AddressOf(Register, VariableOffset)
 }
 
 #[derive(Debug)]

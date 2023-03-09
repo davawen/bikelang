@@ -1,20 +1,27 @@
 use std::{fmt::Display, ops::Not};
 
-use itertools::Itertools;
-
 use super::*;
 use crate::utility::color::*;
 
 type ReverseNames<'a> = &'a [HashMap<VariableKey, String>];
 
-fn format_variable(var: &VariableId, variable_names: ReverseNames ) -> String {
-    fmtools::format!(
-        "(" {var:?} " "
-        if let Some(name) = variable_names[var.0].get(&var.1) {
-            {GREEN}"\""{name}"\" "{WHITE}
+fn format_variable(var: &VariableOffset) -> String {
+    fmtools::format!{
+        "( " 
+        if var.argument {
+            "BASE + "{var.offset}
+        } else {
+            "BASE - "{var.offset + var.size}
         }
-        ")"
-    )
+        " )"
+    }
+    // fmtools::format!(
+    //     "(" {var:?} " "
+    //     if let Some(name) = variable_names[var.0].get(&var.1) {
+    //         {GREEN}"\""{name}"\" "{WHITE}
+    //     }
+    //     ")"
+    // )
 }
 
 // fn format_scope(scope: &Scope, scopes: &[Scope]) -> String {
@@ -22,10 +29,10 @@ fn format_variable(var: &VariableId, variable_names: ReverseNames ) -> String {
 // }
 
 impl Address {
-    fn format(&self, variable_names: ReverseNames) -> String {
+    fn format(&self) -> String {
         match self {
             Address::Ptr(ptr, size) => format!("(*{ptr} $ {CYAN}{size} bytes{WHITE})"),
-            Address::Variable(var) => format_variable(var, variable_names)
+            Address::Variable(var) => format_variable(var)
         }
     }
 }
@@ -51,7 +58,7 @@ impl Display for Register {
 }
 
 impl Arithmetic {
-    fn format(&self, variable_names: ReverseNames) -> String {
+    fn format(&self) -> String {
         use Arithmetic::*;
         fmtools::format!(
             match self {
@@ -66,7 +73,7 @@ impl Arithmetic {
                 Not(a) => "LOGICAL INVERSE "{a},
                 Negate(a) => "NEGATE "{a},
                 Deref(a, _) => "DEREFERENCE "{a},
-                AddressOf(reg, var) => "PUT ADDRESS OF "{format_variable(var, variable_names)}" INTO "{reg}
+                AddressOf(reg, var) => "PUT ADDRESS OF "{format_variable(var)}" INTO "{reg}
             }
         )
     }
@@ -105,16 +112,16 @@ impl Display for Intrisic {
 }
 
 impl Instruction {
-    fn format(&self, functions: &[Function], variable_names: ReverseNames) -> String {
+    fn format(&self, functions: &[Function]) -> String {
         use Instruction::*;
         match self {
-            VariableStore(var, val) => format!("{YELLOW}STORE{WHITE} {val} INTO {}", var.format(variable_names)),
-            VariableLoad(reg, var) => format!("{YELLOW}LOAD{WHITE} {} INTO {reg}", var.format(variable_names)),
+            VariableStore(var, val) => format!("{YELLOW}STORE{WHITE} {val} INTO {}", var.format()),
+            VariableLoad(reg, var) => format!("{YELLOW}LOAD{WHITE} {} INTO {reg}", var.format()),
             Load(reg, val) => format!("{YELLOW}LOAD{WHITE} {val} into {reg}"),
             LoadSignExtend(reg, val) => format!("{YELLOW}LOAD {PURPLE}SIGN-EXTEND{WHITE} {val} into {reg}"),
             Save(reg) => format!("{BLUE}SAVE{WHITE} {reg}"),
             Restore(reg) => format!("{BLUE}RESTORE{WHITE} {reg}"),
-            StoreOperation(op) => op.format(variable_names),
+            StoreOperation(op) => op.format(),
             StoreComparison(reg, comp) => format!("{YELLOW}LOAD{WHITE} {comp} into {reg}"),
             Label(idx) => format!("{RED}LABEL {idx}{WHITE}:"),
             Jump(idx, comp) => fmtools::format!(
@@ -138,43 +145,45 @@ impl Instruction {
 impl Display for Ir {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 
-        fmtools::write!(f, 
+        fmtools::write!{f, 
             for func in &self.functions {
                 "FUNCTION "{BLUE}{func.name}{WHITE}"\n"
-                "  VARIABLES:\n"
-                {func.scopes:#?}
-                let variables_names = func.scopes.iter().map(|s| {
-                    s.named_variables.iter().map(|(a, b)| (*b, a.clone())).collect::<HashMap<_, _>>()
-                }).collect_vec();
+                "  STACK SPACE RESERVED: "
+                {func.stack_offset}
+                "\n"
+                // "  VARIABLES:\n"
+                // let variables_names = func.scopes.iter().map(|s| {
+                //     s.named_variables.iter().map(|(a, b)| (*b, a.clone())).collect::<HashMap<_, _>>()
+                // }).collect_vec();
 
-                for (var, offset) in &func.scopes[0].variables {
-                    "    "{GREEN}
-                    if let Some(name) = variables_names[0].get(&var) {
-                        '"'{name}"\": "
-                    }
-                    else if Some(var) == func.return_variable {
-                        "\"return\": "
-                    }
-                    else {
-                        {var:?}
-                    }
-                    {WHITE}
-                    "size: "{CYAN}{offset.size}{WHITE}", offset: "{CYAN}{offset.offset}
-                    if offset.argument {
-                        {BLUE}" (argument)"
-                    }
-                    {WHITE}"\n"
-                }
+                // for (var, offset) in &func.scopes[0].variables {
+                //     "    "{GREEN}
+                //     if let Some(name) = variables_names[0].get(&var) {
+                //         '"'{name}"\": "
+                //     }
+                //     else if Some(var) == func.return_variable {
+                //         "\"return\": "
+                //     }
+                //     else {
+                //         {var:?}
+                //     }
+                //     {WHITE}
+                //     "size: "{CYAN}{offset.size}{WHITE}", offset: "{CYAN}{offset.offset}
+                //     if offset.argument {
+                //         {BLUE}" (argument)"
+                //     }
+                //     {WHITE}"\n"
+                // }
                 "  INSTRUCTIONS:\n"
                 for (idx, ins) in func.instructions.iter().enumerate() {
-                    "  "{idx + 1: >3}" | "{ins.format(&self.functions, &variables_names)}"\n"
+                    "  "{idx + 1: >3}" | "{ins.format(&self.functions)}"\n"
                 }
             }
             "LITERALS:\n"
             for (idx, literal) in self.literals.iter().enumerate() {
                 "  literal "{idx}": "{GREEN}{literal:?}{WHITE}"\n"
             }
-        )?;
+        }?;
 
         Ok(())
     }

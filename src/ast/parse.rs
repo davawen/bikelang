@@ -355,7 +355,7 @@ fn parse_block(start_brace: Item, lexer: &mut Lexer) -> Result<Ast> {
     }
 
     let (inner, rtoken) = parse_block_vec(lexer)?;
-    Ok(Node::Block { inner, scope: default(), ty: default() }.ast(start_brace.bounds.with_end_of(rtoken.bounds)))
+    Ok(Node::Block { inner, ty: default() }.ast(start_brace.bounds.with_end_of(rtoken.bounds)))
 }
 
 /// Parses a block including its ending brace
@@ -401,5 +401,5 @@ pub fn parse_ast(lexer: &mut Lexer) -> Result<Ast> {
         start: root.first().map(|x| x.bounds.start).unwrap_or(0),
         end: root.last().map(|x| x.bounds.end).unwrap_or(0) 
     };
-    Ok(Node::Block { inner: root, scope: default(), ty: default() }.ast(bounds))
+    Ok(Node::Block { inner: root, ty: default() }.ast(bounds))
 }

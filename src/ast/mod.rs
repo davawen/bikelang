@@ -3,7 +3,6 @@ use thiserror::Error;
 use crate::{typed::Type, token::{Token, Lexer, Operation, Dir, self, Item}, error::{Result, ToCompilerError}, utility::Bounds};
 
 pub mod node;
-pub mod scope;
 pub mod analysis;
 pub mod parse;
 mod format;

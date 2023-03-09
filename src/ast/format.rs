@@ -84,7 +84,7 @@ impl Display for Ast {
                 let is_last = idx == inner.len()-1;
 
                 let mut it = arm.split_inclusive('\n');
-                let first = it.next().unwrap();
+                let Some(first) = it.next() else { continue };
 
                 let connector = if is_last { '╰' } else { '├' };
                 let separator = if is_last { ' ' } else { '│' };

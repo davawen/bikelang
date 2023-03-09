@@ -2,7 +2,7 @@ use std::{collections::HashMap, default::default};
 
 use slotmap::SlotMap;
 
-use crate::ast;
+use crate::scope::ScopeTrait;
 
 use super::LabelIndex;
 
@@ -22,110 +22,56 @@ pub struct VariableOffset {
     pub argument: bool
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct Scope {
     pub variables: SlotMap<VariableKey, VariableOffset>,
     pub named_variables: HashMap<String, VariableKey>,
-    pub parent: Option<ScopeIndex>,
-    pub childs: Vec<ScopeIndex>,
-    pub idx: ScopeIndex,
+    pub offset: u32,
     pub kind: ScopeKind
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub enum ScopeKind {
+    #[default]
     Block,
     // If { end_label: LabelIndex },
     Loop { /* start_label: LabelIndex, */ end_label: LabelIndex }
 }
 
 impl Scope {
-    pub fn new() -> Self {
+    pub fn with_parent(parent: &Scope, kind: ScopeKind) -> Self {
         Self {
-            variables: default(),
-            named_variables: default(),
-            parent: None,
-            idx: 0,
-            childs: vec![],
-            kind: ScopeKind::Block
+            offset: parent.offset,
+            kind,
+            ..default()
         }
     }
+}
 
-    pub fn from_parameters(scope: ast::scope::Scope, idx: ScopeIndex) -> Self {
-        let mut variables = SlotMap::new();
-        let mut offset = 16;
-        let named_variables = scope.variables.into_iter()
-            .map(|(name, ty)| {
-                let size = ty.size();
-                let key = variables.insert(VariableOffset {
-                    size,
-                    offset,
-                    argument: true
-                });
-                offset += size;
+impl ScopeTrait for Scope {
+    type VariableType = VariableOffset;
+    type Key = VariableKey;
 
-                (name, key)
-            })
-            .collect();
-
-        Self {
-            variables,
-            named_variables,
-            parent: scope.parent,
-            childs: scope.childs,
-            idx,
-            kind: ScopeKind::Block
-        }
+    fn has_variable(&self, name: &str) -> bool {
+        self.named_variables.contains_key(name)
     }
 
-    pub fn from_ast_scope(scope: ast::scope::Scope, idx: ScopeIndex) -> Self {
-        let mut variables = SlotMap::new();
-        let mut offset = 0;
-        let named_variables = scope.variables.into_iter()
-            .map(|(name, ty)| {
-                let size = ty.size();
-                offset += size;
-                let key = variables.insert(VariableOffset {
-                    size,
-                    offset: scope.offset + offset,
-                    argument: false
-                });
+    fn get_variable(&self, name: &str) -> Option<&Self::VariableType> {
+        let Some(key) = self.named_variables.get(name) else { return None };
 
-                (name, key)
-            })
-            .collect();
-
-        Self {
-            variables,
-            named_variables,
-            parent: scope.parent,
-            childs: scope.childs,
-            idx,
-            kind: ScopeKind::Block
-        }
+        self.variables.get(*key)
     }
 
-    /// Searchs up the scope tree to get the wanted variable
-    /// Garanteed by `ast::analysis` to not fail
-    pub fn get(&self, name: &str, scopes: &[Scope]) -> VariableId {
-        if let Some(key) = self.named_variables.get(name) {
-            VariableId(self.idx, *key)
-        } else {
-            eprintln!("{}, {:?}, {}, {:#?}", self.idx, self.parent, name, self);
-            let parent = self.parent.unwrap();
-            scopes[parent].get(name, scopes)
-        }
+    fn insert(&mut self, name: String, var: Self::VariableType) -> Self::Key {
+        self.offset += var.size;
+
+        let key = self.variables.insert(var);
+        self.named_variables.insert(name, key);
+        key
     }
 
-    /// Search up for a specific scope kind using the given predicate
-    pub fn search<'a, P: Fn(&ScopeKind) -> bool>(&'a self, scopes: &'a [Scope], predicate: P) -> Option<&'a ScopeKind> {
-        if predicate(&self.kind) {
-            Some(&self.kind)
-        } else if let Some(parent) = self.parent {
-            scopes[parent].search(scopes, predicate)
-        } else {
-            None
-        }
+    fn get_index(&self, idx: Self::Key) -> &Self::VariableType {
+        &self.variables[idx]
     }
 }

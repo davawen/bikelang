@@ -1,8 +1,10 @@
+use std::default::default;
+
 use itertools::Itertools;
 
-use crate::{ast::{self, analysis, BinaryOperation, UnaryOperation}, typed::{Type, SuperType}};
+use crate::{ast::{self, analysis, BinaryOperation, UnaryOperation}, typed::{Type, SuperType}, scope::{ScopeTrait, ScopeStack}};
 
-use super::{*, scope::{VariableOffset, ScopeIndex, ScopeKind}};
+use super::{*, scope::{VariableOffset, ScopeKind}};
 
 impl Arithmetic {
     fn from_op(op: BinaryOperation, lhs: Register, rhs: Value) -> Self {
@@ -59,26 +61,42 @@ impl Comparison {
     }
 }
 
+fn insert_declaration(scopes: &mut ScopeStack<Scope>, name: String, ty: Type) -> VariableKey {
+    let size = ty.size();
+    scopes.insert(name, VariableOffset {
+        size,
+        offset: scopes.top().offset,
+        argument: false
+    })
+}
+
 impl Function {
     /// Invariant: app's function_bodies can't be used!
-    /// Invariant: app's function definition's scopes are invalid! (moved into IR scopes)
-    fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, func: &analysis::Function, scope: ScopeIndex, ast: ast::Ast) -> Value {
+    fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, func: &analysis::Function, scopes: &mut ScopeStack<Scope>, ast: ast::Ast) -> Value {
         match ast.node {
+            ast::Node::Definition { name, typename } => {
+                insert_declaration(scopes, name, typename);
+
+                Value::NoValue
+            }
             ast::Node::Expr { op: BinaryOperation::Assignment, ty: _, box lhs, box rhs } => {
                 let address = match lhs.node {
-                    ast::Node::Identifier(var, _) | ast::Node::Definition { name: var, .. } => {
-                        let scope = &self.scopes[scope];
-                        let var = scope.get(&var, &self.scopes);
+                    ast::Node::Definition { name, typename } => {
+                        let var = insert_declaration(scopes, name, typename);
+                        scopes.get_index(var).into()
+                    }
+                    ast::Node::Identifier(var, _) => {
+                        let var = scopes.get(&var).unwrap();
                         var.into()
                     }
                     ast::Node::UnaryExpr { op: UnaryOperation::Deref, ty, value: var, .. } => {
-                        let var = self.fold_node(ir, app, func, scope, *var);
+                        let var = self.fold_node(ir, app, func, scopes, *var);
                         Address::Ptr(var, ty.size())
                     }
                     _ => unreachable!("Cannot assign to {lhs:?}"),
                 };
 
-                let rhs = self.fold_node(ir, app, func, scope, rhs);
+                let rhs = self.fold_node(ir, app, func, scopes, rhs);
 
                 address.free_register(ir);
                 rhs.free_register(ir);
@@ -95,14 +113,15 @@ impl Function {
                     AddressOf => {
                         let ast::Node::Identifier(name, _ty) = inner.node 
                             else { unreachable!("Trying to take address of literal") };
+
                         let reg = Register::get(ir, 8);
                         value = Value::Register(reg);
 
-                        let scope = &self.scopes[scope];
-                        Arithmetic::AddressOf(reg, scope.get(&name, &self.scopes))
+                        let var = scopes.get(&name).unwrap();
+                        Arithmetic::AddressOf(reg, *var)
                     },
                     op => {
-                        value = self.fold_node(ir, app, func, scope, inner);
+                        value = self.fold_node(ir, app, func, scopes, inner);
                         let reg = value.as_register(ir, &mut self.instructions);
                         value = Value::Register(reg);
                         match op {
@@ -121,8 +140,8 @@ impl Function {
                 value
             }
             ast::Node::Expr { op, ty, box lhs, box rhs } => {
-                let lhs = self.fold_node(ir, app, func, scope, lhs);
-                let rhs = self.fold_node(ir, app, func, scope, rhs);
+                let lhs = self.fold_node(ir, app, func, scopes, lhs);
+                let rhs = self.fold_node(ir, app, func, scopes, rhs);
 
                 let (out, ins) = match op {
                     op if op.is_arithmetic() || op.is_logic() => {
@@ -163,7 +182,7 @@ impl Function {
 
                 let inner_type = expr.get_type();
 
-                let inner = self.fold_node(ir, app, func, scope, expr);
+                let inner = self.fold_node(ir, app, func, scopes, expr);
 
                 let reg = Register::get(ir, ty.size());
 
@@ -185,7 +204,7 @@ impl Function {
                 let idx = app.function_definitions.get_index_of(&name).unwrap();
 
                 let return_size = return_type.size();
-                let arguments: Vec<_> = argument_list.into_iter().map(|n| self.fold_node(ir, app, func, scope, n)).collect();
+                let arguments: Vec<_> = argument_list.into_iter().map(|n| self.fold_node(ir, app, func, scopes, n)).collect();
                 for p in &arguments {
                     p.free_register(ir);
                 }
@@ -226,16 +245,16 @@ impl Function {
             ast::Node::Intrisic(i) => {
                 match i {
                     ast::Intrisic::Asm(box str) => {
-                        let str = self.fold_node(ir, app, func, scope, str);
+                        let str = self.fold_node(ir, app, func, scopes, str);
                         self.instructions.push(Instruction::Intrisic(Intrisic::Asm(str)));
                     },
                     ast::Intrisic::Print(values) => {
                         for node in values {
                             // Desugar print intrisic
                             let print = match node.get_type().clone() {
-                                Type::Ptr(box Type::UInt8) => Intrisic::PrintString(self.fold_node(ir, app, func, scope, node)),
+                                Type::Ptr(box Type::UInt8) => Intrisic::PrintString(self.fold_node(ir, app, func, scopes, node)),
                                 ty if SuperType::Integer.verify(&ty) => {
-                                    let num = self.fold_node(ir, app, func, scope, node);
+                                    let num = self.fold_node(ir, app, func, scopes, node);
                                     num.free_register(ir);
                                     Intrisic::PrintNumber(num, ty)
                                 }
@@ -252,8 +271,8 @@ impl Function {
             ast::Node::If { box condition, box body, else_body, ty } => {
                 let jump_comparison = match condition.node { 
                     ast::Node::Expr { op, ty: _, lhs, rhs} if op.is_comparison() => {
-                        let lhs = self.fold_node(ir, app, func, scope, *lhs);
-                        let rhs = self.fold_node(ir, app, func, scope, *rhs);
+                        let lhs = self.fold_node(ir, app, func, scopes, *lhs);
+                        let rhs = self.fold_node(ir, app, func, scopes, *rhs);
 
                         // Allow using registers after this instruction
                         // Note: this is fine because the comparison is pushed right after
@@ -263,7 +282,7 @@ impl Function {
                         Comparison::from_op(op, lhs, rhs).inverse() // Skip the function's body if the condition is NOT true
                     } 
                     _ => {
-                        let value = self.fold_node(ir, app, func, scope, condition);
+                        let value = self.fold_node(ir, app, func, scopes, condition);
                         value.free_register(ir);
 
                         Comparison::NotZero(value).inverse()
@@ -273,7 +292,7 @@ impl Function {
                 let end_body_idx = self.add_label();
                 self.instructions.push(Instruction::Jump(end_body_idx, jump_comparison));
 
-                let body_result = self.fold_node(ir, app, func, scope, body);
+                let body_result = self.fold_node(ir, app, func, scopes, body);
 
                 // If there is an else, jump to the end of the branch when you've finished executing the body
                 if let Some(box else_body) = else_body {
@@ -283,7 +302,7 @@ impl Function {
                     self.instructions.push(Instruction::Jump(end_if_idx, Comparison::Unconditional));
 
                     self.instructions.push(Instruction::Label(end_body_idx)); // go here if condition was false
-                    let else_result = self.fold_node(ir, app, func, scope, else_body);
+                    let else_result = self.fold_node(ir, app, func, scopes, else_body);
                     else_result.free_register(ir);
                     self.instructions.push(Instruction::Load(reg, else_result));
 
@@ -300,22 +319,21 @@ impl Function {
                 let loop_start = self.add_label();
                 let loop_end = self.add_label();
 
-                // Set scope kind of inner block
-                if let &ast::Node::Block { scope: loop_scope, .. } = &body.node { 
-                    self.scopes[loop_scope].kind = ScopeKind::Loop { end_label: loop_end };
-                } else { unreachable!() };
+                scopes.push(Scope::with_parent(scopes.top(), ScopeKind::Loop { end_label: loop_end }));
 
                 self.instructions.push(Instruction::Label(loop_start));
-                self.fold_node(ir, app, func, scope, body).free_register(ir);
+                self.fold_node(ir, app, func, scopes, body).free_register(ir);
 
                 self.instructions.push(Instruction::Jump(loop_start, Comparison::Unconditional));
                 self.instructions.push(Instruction::Label(loop_end));
 
+                scopes.pop();
+
                 Value::NoValue
             }
             ast::Node::Break => {
-                let scope = &self.scopes[scope];
-                let Some(ScopeKind::Loop { end_label, .. }) = scope.search(&self.scopes, |k| matches!(k, ScopeKind::Loop { .. }))
+                let Some(Scope { kind: ScopeKind::Loop { end_label, .. }, .. })
+                    = scopes.iter().find(|s| matches!(s.kind, ScopeKind::Loop { .. }))
                     else { unreachable!("Break called outside of a loop") };
 
                 self.instructions.push(Instruction::Jump(*end_label, Comparison::Unconditional));
@@ -323,43 +341,50 @@ impl Function {
                 Value::NoValue
             }
             ast::Node::Return(inner) => {
-                let inner = self.fold_node(ir, app, func, scope, *inner);
+                let inner = self.fold_node(ir, app, func, scopes, *inner);
                 inner.free_register(ir);
+
                 if let Some(return_variable) = self.return_variable {
-                    self.instructions.push(Instruction::VariableStore(VariableId(0, return_variable).into(), inner));
+                    let function_scope = scopes.at(0);
+                    self.instructions.push(Instruction::VariableStore(function_scope.get_index(return_variable).into(), inner));
                 }
                 self.instructions.push(Instruction::Ret);
 
                 Value::NoValue
             }
-            ast::Node::Block { inner: nodes, scope, ty: _ } => {
-                // let scope = &[scope, &[Scope::Block]].concat();
-                let mut it = nodes.into_iter().peekable();
-                while let Some(node) = it.next() {
-                    if it.peek().is_none() { // if last node
-                        return self.fold_node(ir, app, func, scope, node);
+            ast::Node::Block { inner: nodes, ty: _ } => {
+                scopes.push(Scope::with_parent(scopes.top(), ScopeKind::Block));
+
+                let mut out = Value::NoValue;
+
+                let len = nodes.len();
+                for (last, node) in nodes.into_iter().enumerate() {
+                    if last == len-1 { // if last node
+                        out = self.fold_node(ir, app, func, scopes, node);
                     }
                     else {
-                        self.fold_node(ir, app, func, scope, node).free_register(ir);
+                        self.fold_node(ir, app, func, scopes, node).free_register(ir);
                     }
                 }
 
-                Value::NoValue
+                // get maximum stack offset
+                self.stack_offset = self.stack_offset.max(scopes.top().offset);
+                scopes.pop();
+
+                out
             }
             ast::Node::Statement(inner) => {
-                self.fold_node(ir, app, func, scope, *inner).free_register(ir);
+                self.fold_node(ir, app, func, scopes, *inner).free_register(ir);
                 Value::NoValue
             }
             ast::Node::Identifier(name, ty) => {
-                let scope = &self.scopes[scope];
                 let reg = Register::get(ir, ty.size());
-                self.instructions.push(Instruction::VariableLoad(reg, scope.get(&name, &self.scopes).into()));
+                self.instructions.push(Instruction::VariableLoad(reg, scopes.get(&name).unwrap().into()));
                 Value::Register(reg)
             }
             ast::Node::Number(n, ty) => Value::Number(n, ty.size()),
             ast::Node::StringLiteral(s) => Value::Literal(ir.push_literal(s)),
             ast::Node::BoolLiteral(b) => Value::Boolean(b),
-            ast::Node::Definition { .. } => Value::NoValue,
             ast::Node::Empty => Value::NoValue,
             ast::Node::FuncDef { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {self:#?}"),
         }
@@ -371,47 +396,45 @@ impl Function {
         idx
     }
 
-    fn new(name: String, definition: &mut analysis::Function) -> Self {
-        // Translate definition scopes into ir scopes
-        let ast_scopes = std::mem::replace(&mut definition.scopes, Vec::new());
-
-        // Calculate maximum stack offset
-        let stack_offset = ast_scopes[1..].iter().map(|s| s.offset + s.size).max().unwrap();
-
-        let mut ast_scopes = ast_scopes.into_iter().enumerate();
-
-        let mut scopes = Vec::with_capacity(ast_scopes.len());
-
-        let (_, parameter_scope) = ast_scopes.next().unwrap();
-        let parameter_offset = parameter_scope.size + 16;
-
-        let mut parameter_scope = Scope::from_parameters(parameter_scope, 0);
-
-        let return_size = definition.return_type.size();
-        let return_variable = if return_size > 0 {
-            let r = parameter_scope.variables.insert( VariableOffset { 
-                size: return_size, offset: parameter_offset, argument: true 
-            });
-            Some(r)
-        } else { None };
-
-        scopes.push(parameter_scope);
-        scopes.extend(ast_scopes.map(|(idx, s)| Scope::from_ast_scope(s, idx)));
-
+    fn new(name: String) -> Self {
         Self {
             name,
-            scopes,
-            stack_offset,
-            return_variable,
             instructions: Vec::new(),
             label_num: 0,
+            // Set in fold_node using scopes
+            stack_offset: 0,
+            return_variable: None,
         }
     }
 
     fn generate_ir(&mut self, ir: &mut Ir, app: &analysis::App, definition: &analysis::Function, body: analysis::FunctionBody) {
-        for node in body.body {
-            self.fold_node(ir, app, definition, 1, node);
+        let mut parameter_scope = Scope { offset: 16, ..default() };
+
+        for (name, ty) in &definition.parameters {
+            parameter_scope.insert(name.clone(), VariableOffset {
+                size: ty.size(),
+                offset: parameter_scope.offset,
+                argument: true
+            });
         }
+        
+        let return_size = definition.return_type.size();
+        self.return_variable = if return_size > 0 {
+            let r = parameter_scope.variables.insert( VariableOffset { 
+                size: return_size, offset: parameter_scope.offset, argument: true 
+            });
+            Some(r)
+        } else { None };
+
+        parameter_scope.offset = 0; // don't count parameters in the required stack offset
+
+        let mut stack = ScopeStack::from_top(parameter_scope);
+
+        for node in body.body {
+            self.fold_node(ir, app, definition, &mut stack, node);
+        }
+        self.stack_offset = self.stack_offset.max(stack.top().offset);
+
         self.instructions.push(Instruction::Ret);
     }
 }
@@ -428,10 +451,9 @@ impl Ir {
         app.function_bodies = Vec::new();
 
         for body in bodies {
-            let (name, definition) = app.function_definitions.get_index_mut(body.definition).unwrap();
-            let mut func = Function::new(name.clone(), definition);
+            let (name, definition) = app.function_definitions.get_index(body.definition).unwrap();
+            let mut func = Function::new(name.clone());
 
-            let definition = app.function_definitions.get_index(body.definition).unwrap().1;
             func.generate_ir(&mut this, &app, definition, body);
 
             this.functions.push(func);

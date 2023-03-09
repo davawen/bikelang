@@ -1,6 +1,6 @@
 use crate::{typed::Type, utility::Bounds, token::Item};
 
-use super::{Ast, scope::ScopeIndex};
+use super::Ast;
 
 #[derive(Debug, Clone)]
 pub enum Node {

@@ -15,5 +15,6 @@ func main() -> void {
         j = j + 1;
     };
 
-    print#("`i` is still valid here: ", i, "\n");
+	// i is not valid here anymore :)
+    //print#("`i` is still valid here: ", i, "\n");
 } 

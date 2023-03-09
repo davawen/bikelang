@@ -13,6 +13,7 @@ mod ast;
 mod ir;
 mod token;
 mod typed;
+mod scope;
 
 #[derive(Parser)]
 struct Args {

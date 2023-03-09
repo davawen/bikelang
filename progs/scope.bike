@@ -1,3 +1,10 @@
+func test(i32 a, i32 b) -> i32 {
+	let i32 addition = a+b;
+	let i32 multiplication = a*b;
+
+	return addition + multiplication;
+}
+
 func main() {
 	let i32 function = 10;
 	// 4 bytes -> offset 0
@@ -6,7 +13,7 @@ func main() {
 		// 0 bytes -> 4 bytes
 
 		{
-			let i8 inner = 2;
+			let i8 inner = 1;
 			// 4 bytes -> 4 bytes
 		};
 

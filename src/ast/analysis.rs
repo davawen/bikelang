@@ -5,8 +5,12 @@ use itertools::Itertools;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
-use crate::{utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType, TypeDescriptor}, super_type_or, error::{Result, ToCompilerError}, };
-use super::{Ast, node::{Node, Intrisic, BinaryOperation, UnaryOperation}, scope::{Scope, ScopeStack} };
+use crate::{utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType, TypeDescriptor}, super_type_or, error::{Result, ToCompilerError}, scope::{ScopeTrait, ScopeStack}, };
+use super::{Ast, node::{Node, Intrisic, BinaryOperation, UnaryOperation}};
+
+pub type FunctionIndex = usize;
+pub type FunctionBodyIndex = usize;
+pub type VariableIndex = usize;
 
 #[derive(Debug)]
 pub struct App {
@@ -30,9 +34,32 @@ pub struct FunctionBody {
     pub definition: FunctionIndex
 }
 
-pub type FunctionIndex = usize;
-pub type FunctionBodyIndex = usize;
-// pub type TypeIndex = usize;
+#[derive(Debug, Clone, Default)]
+pub struct Scope {
+    pub variables: IndexMap<String, Type>,
+}
+
+impl ScopeTrait for Scope {
+    type VariableType = Type;
+    type Key = VariableIndex;
+
+    fn has_variable(&self, name: &str) -> bool {
+        self.variables.contains_key(name)
+    }
+
+    fn get_variable(&self, name: &str) -> Option<&Self::VariableType> {
+        self.variables.get(name)
+    }
+
+    fn insert(&mut self, name: String, var: Self::VariableType) -> Self::Key {
+        self.variables.insert_full(name, var).0
+    }
+
+    fn get_index(&self, idx: Self::Key) -> &Self::VariableType {
+        &self.variables[idx]
+    }
+    
+}
 
 #[derive(Debug, Clone, Error)]
 pub enum AnalysisError {
@@ -92,7 +119,7 @@ impl Ast {
     /// * `app`: Global application state (functions and types)
     /// * `definition`: Definition of the current function
     /// * `expect`: Type that's expected from the node, for simple coercions
-    pub fn set_type(&mut self, app: &App, definition: &Function, scopes: &mut ScopeStack, expect: Option<&Type>) -> Result<TypeDescriptor> {
+    pub fn set_type(&mut self, app: &App, definition: &Function, scopes: &mut ScopeStack<Scope>, expect: Option<&Type>) -> Result<TypeDescriptor> {
         match &mut self.node {
             Node::Number(value, ty) => {
                 *ty = Type::Int32;
