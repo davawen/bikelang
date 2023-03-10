@@ -53,10 +53,6 @@ impl ScopeTrait for Scope {
     type VariableType = VariableOffset;
     type Key = VariableKey;
 
-    fn has_variable(&self, name: &str) -> bool {
-        self.named_variables.contains_key(name)
-    }
-
     fn get_variable(&self, name: &str) -> Option<&Self::VariableType> {
         let Some(key) = self.named_variables.get(name) else { return None };
 
@@ -67,7 +63,12 @@ impl ScopeTrait for Scope {
         self.offset += var.size;
 
         let key = self.variables.insert(var);
-        self.named_variables.insert(name, key);
+        if let Some(shadowed) = self.named_variables.insert(name, key) {
+            let shadowed = self.variables.remove(shadowed).expect("undefined shadowed variable");
+            self.offset -= shadowed.size;
+            self.variables[key].offset -= shadowed.size; // offset is set based on the top of the stack
+        }
+
         key
     }
 

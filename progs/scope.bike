@@ -7,20 +7,19 @@ func test(i32 a, i32 b) -> i32 {
 
 func main() {
 	let i32 function = 10;
-	// 4 bytes -> offset 0
 
 	{
-		// 0 bytes -> 4 bytes
-
 		{
-			let i8 inner = 1;
-			// 4 bytes -> 4 bytes
+			let i8 inner = 2;
+
+			// shadow
+			let i32 inner = <i32>inner;
 		};
 
+		// uses the same space as the scope above
 		let i32 inner = 5;
 
 		print#("inner: ", inner, "\n");
-		// 4 bytes -> 4 bytes
 	};
 
 	print#("function: ", function, "\n");

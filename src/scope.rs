@@ -2,7 +2,6 @@ pub trait ScopeTrait {
     type VariableType;
     type Key;
 
-    fn has_variable(&self, name: &str) -> bool;
     fn get_variable(&self, name: &str) -> Option<&Self::VariableType>;
     fn get_index(&self, idx: Self::Key) -> &Self::VariableType;
     fn insert(&mut self, name: String, var: Self::VariableType) -> Self::Key;
@@ -39,16 +38,6 @@ impl<T: ScopeTrait> ScopeStack<T> {
 
     pub fn pop(&mut self) {
         self.0.pop();
-    }
-
-    /// Searches up the scope-tree to see if a variable exists
-    pub fn has(&self, name: &str) -> bool {
-        for scope in self.iter() {
-            if scope.has_variable(name) {
-                return true;
-            }
-        }
-        false
     }
 
     /// Searches up the scope tree to get a variable

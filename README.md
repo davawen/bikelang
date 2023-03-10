@@ -146,7 +146,7 @@ You can see more examples in the `progs/` folder.
 - [x] Pointer operations with `*` and `&`
 - [x] Type conversions with `<type>value`
 - [x] Else condition and if-expressions
-- [ ] Variable scope and shadowing
+- [x] Variable scope and shadowing
 - [ ] Structs
 - [ ] Type accessors with `::`
 - [ ] Methods and UFCS

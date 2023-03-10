@@ -5,7 +5,7 @@ use indexmap::IndexSet;
 
 use crate::typed;
 
-use self::scope::{Scope, VariableKey, VariableId, VariableOffset};
+use self::scope::{Scope, VariableKey, VariableOffset};
 
 mod generate;
 mod scope;

@@ -132,10 +132,6 @@ impl Type {
 }
 
 impl TypeDescriptor {
-    pub fn new(ty: Type, has_address: bool) -> Self {
-        Self { ty, has_address }
-    }
-
     pub fn addressable(mut self) -> Self {
         self.has_address = true;
         self

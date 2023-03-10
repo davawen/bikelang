@@ -43,10 +43,6 @@ impl ScopeTrait for Scope {
     type VariableType = Type;
     type Key = VariableIndex;
 
-    fn has_variable(&self, name: &str) -> bool {
-        self.variables.contains_key(name)
-    }
-
     fn get_variable(&self, name: &str) -> Option<&Self::VariableType> {
         self.variables.get(name)
     }
@@ -65,8 +61,6 @@ impl ScopeTrait for Scope {
 pub enum AnalysisError {
     #[error("Wrong node type used, exepected {0}, got {1:?}")]
     WrongNodeType(&'static str, Node),
-    #[error("Redefinition of {0} {1}")]
-    Redefinition(&'static str, String),
     #[error("Unknown {0} {1}")]
     Unknown(&'static str, String),
     #[error("Wrong number of arguments given to function {0}: expected {1}, got {2}.")]
@@ -82,7 +76,7 @@ impl Function {
 
     /// Inserts a function declaration and body into an app
     fn insert(app: &mut App, definition: Ast) -> Result<()> {
-        let Node::FuncDef { name, return_type, parameter_list, box mut body } = definition.node
+        let Node::FuncDef { name, return_type, parameter_list, box body } = definition.node
             else { return Err(AnalysisError::WrongNodeType("no function definition given", definition.node)).at(definition.bounds) };
 
         let parameters =  parameter_list.into_iter().map(|p| {
@@ -212,14 +206,19 @@ impl Ast {
                 Ok(descriptor)
             }
             Node::Expr { op: BinaryOperation::Assignment, ty: _, box lhs, box rhs } => {
-                let expected_type = lhs.set_type(app, definition, scopes, None)?;
+                // TODO: Find a better way to deal with expected type
+                let expected_type = if let Node::Definition { typename, .. } = &lhs.node {
+                    Some(typename)
+                } else { None };
 
+                let rhs_type = rhs.set_type(app, definition, scopes, expected_type)?;
+                
+                // Parse definition after expression
+                let expected_type = lhs.set_type(app, definition, scopes, None)?;
                 // Can't assign to r-value
                 if !expected_type.has_address {
                     return Err(AnalysisError::WrongNodeType("given node isn't assignable to", lhs.node.clone())).at_ast(lhs);
                 }
-
-                let rhs_type = rhs.set_type(app, definition, scopes, Some(&expected_type.ty))?;
 
                 rhs_type.expect(expected_type.ty.into(), "cannot assign value to variable").at_ast(rhs)?;
                 Ok(Type::Void.into())

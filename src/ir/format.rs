@@ -3,8 +3,6 @@ use std::{fmt::Display, ops::Not};
 use super::*;
 use crate::utility::color::*;
 
-type ReverseNames<'a> = &'a [HashMap<VariableKey, String>];
-
 fn format_variable(var: &VariableOffset) -> String {
     fmtools::format!{
         "( " 

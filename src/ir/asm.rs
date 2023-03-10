@@ -12,7 +12,7 @@ fn word_size(size: u32) -> &'static str {
     }
 }
 
-fn variable_operand(func: &Function, var: VariableOffset) -> String {
+fn variable_operand(_func: &Function, var: VariableOffset) -> String {
     // let var = &func.scopes[key.0].variables[key.1];
     fmtools::format!(
         {word_size(var.size)} " "
@@ -77,7 +77,7 @@ impl Address {
 }
 
 impl Value {
-    fn as_operand(&self, func: &Function) -> String {
+    fn as_operand(&self) -> String {
         match self {
             &Value::Number(x, size) => format!("{} {x}", word_size(size)),
             &Value::Boolean(x) => if x { "BYTE 1".to_owned() } else { "BYTE 0".to_owned() },
@@ -114,7 +114,7 @@ impl Arithmetic {
                 };
                 let reg = lhs.as_str();
                 (reg, format!(
-                    "{op} {reg}, {}\n", rhs.as_operand(func)
+                    "{op} {reg}, {}\n", rhs.as_operand()
                 ))
             }
             Div(lhs, rhs) | Modulus(lhs, rhs)  => {
@@ -137,7 +137,7 @@ impl Arithmetic {
                     "push rdx\n"
                     "push r8\n"
                     "xor rdx, rdx\n"
-                    "mov "{r8}", "{rhs.as_operand(func)}"\n"
+                    "mov "{r8}", "{rhs.as_operand()}"\n"
                     "idiv "{r8}"\n"
                     if let Modulus(..) = self {
                         "mov rax, rdx\n"
@@ -180,12 +180,12 @@ impl Comparison {
         match self {
             Unconditional | Never => "".to_owned(),
             NotZero(v) | Zero(v) => {
-                let v = v.as_operand(func);
+                let v = v.as_operand();
                 format!("test {v}, {v}")  
             },
             Eq(l, r) | Neq(l, r) | Gt(l, r) | Ge(l, r) | Lt(l, r) | Le(l, r) => {
-                let l = l.as_operand(func);
-                let r = r.as_operand(func);
+                let l = l.as_operand();
+                let r = r.as_operand();
                 format!("cmp {l}, {r}")
             }
         }
@@ -224,7 +224,7 @@ impl Comparison {
 }
 
 impl Intrisic {
-    fn generate_asm(&self, ir: &Ir, func: &Function) -> String {
+    fn generate_asm(&self, ir: &Ir) -> String {
         use Intrisic::*;
         match self {
             Asm(Value::Literal(inner)) => {
@@ -237,7 +237,7 @@ impl Intrisic {
                     if !is_rax {
                         let rax = RegisterKind::Rax.with_size(v.size()).as_str();
                         "push rax\n" // save value of rax
-                        "mov "{rax}", "{v.as_operand(func)}"\n"
+                        "mov "{rax}", "{v.as_operand()}"\n"
                     }
 
                     // Extend size of rax if it's signed
@@ -276,7 +276,7 @@ impl Instruction {
         match self {
             Instruction::VariableStore(var, value) => {
                 // No memory access in values = no problems c:
-                format!("mov {}, {}", var.as_operand(func), value.as_operand(func))
+                format!("mov {}, {}", var.as_operand(func), value.as_operand())
             }
             Instruction::VariableLoad(reg, var) => {
                 format!("mov {}, {}", reg.as_str(), var.as_operand(func))
@@ -284,16 +284,16 @@ impl Instruction {
             Instruction::Load(reg, value) => {
                 // mov with 32 bit or greater operands automatically do zero-extend
                 if reg.size == value.size() {
-                    format!("mov {}, {}", reg.as_str(), value.as_operand(func))
+                    format!("mov {}, {}", reg.as_str(), value.as_operand())
                 } else if value.size() == 4 { 
                     // mov zero extend is weird as shit for 32bit operands fuck this shit fuch life fuck me https://www.felixcloutier.com/x86/movzx
-                    format!("mov {}, {}", reg.kind.with_size(4).as_str(), value.as_operand(func))
+                    format!("mov {}, {}", reg.kind.with_size(4).as_str(), value.as_operand())
                 } else {
-                    format!("movzx {}, {}", reg.as_str(), value.as_operand(func))
+                    format!("movzx {}, {}", reg.as_str(), value.as_operand())
                 }
             }
             Instruction::LoadSignExtend(reg, value) => {
-                format!("movsx {}, {}", reg.as_str(), value.as_operand(func))
+                format!("movsx {}, {}", reg.as_str(), value.as_operand())
             }
             Instruction::Save(reg) => {
                 format!("sub rsp, {}\nmov {} [rsp], {}", reg.size, word_size(reg.size), reg.as_str())
@@ -319,7 +319,7 @@ impl Instruction {
                 format!("{comparison}\n{jump} .label{label_idx}\n")
             }
             Instruction::Intrisic(i) => {
-                i.generate_asm(ir, func)
+                i.generate_asm(ir)
             }
             Instruction::Call { func: func_idx, arguments, return_type } => {
                 let param_size = arguments.iter().map(Value::size).sum::<u32>();
@@ -336,7 +336,7 @@ impl Instruction {
                     for (p, offset) in arguments.iter().zip(&offsets) {
                         let size = p.size();
                         "mov "{word_size(size)}" [rsp + "{offset}"], "
-                        {p.as_operand(func)}"\n"
+                        {p.as_operand()}"\n"
                     }
                     "call "{ir.functions[*func_idx].name}"\n"
                     "add rsp, "{param_size}"\n"
