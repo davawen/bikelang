@@ -149,29 +149,6 @@ impl Display for Ir {
                 "  STACK SPACE RESERVED: "
                 {func.stack_offset}
                 "\n"
-                // "  VARIABLES:\n"
-                // let variables_names = func.scopes.iter().map(|s| {
-                //     s.named_variables.iter().map(|(a, b)| (*b, a.clone())).collect::<HashMap<_, _>>()
-                // }).collect_vec();
-
-                // for (var, offset) in &func.scopes[0].variables {
-                //     "    "{GREEN}
-                //     if let Some(name) = variables_names[0].get(&var) {
-                //         '"'{name}"\": "
-                //     }
-                //     else if Some(var) == func.return_variable {
-                //         "\"return\": "
-                //     }
-                //     else {
-                //         {var:?}
-                //     }
-                //     {WHITE}
-                //     "size: "{CYAN}{offset.size}{WHITE}", offset: "{CYAN}{offset.offset}
-                //     if offset.argument {
-                //         {BLUE}" (argument)"
-                //     }
-                //     {WHITE}"\n"
-                // }
                 "  INSTRUCTIONS:\n"
                 for (idx, ins) in func.instructions.iter().enumerate() {
                     "  "{idx + 1: >3}" | "{ins.format(&self.functions)}"\n"
@@ -179,10 +156,33 @@ impl Display for Ir {
             }
             "LITERALS:\n"
             for (idx, literal) in self.literals.iter().enumerate() {
-                "  literal "{idx}": "{GREEN}{literal:?}{WHITE}"\n"
+                "  literal "{idx}": "
+                {GREEN}
+                if literal.len() < 40 {
+                    {literal:?}
+                } else {
+                    let (literal, rest) = split_at_nearest_char_boundary(literal, 40);
+                    {literal:?} "..."{rest.chars().count()}" more characters"
+                }
+                {WHITE}
+                "\n"
             }
         }?;
 
         Ok(())
     }
+}
+
+/// Splits a given string at the nearest char boundary to the left
+///
+/// * `s`: input string
+/// * `idx`: byte index
+fn split_at_nearest_char_boundary(s: &str, mut idx: usize) -> (&str, &str) {
+    while !s.is_char_boundary(idx) {
+        if idx == 0 { panic!("Invalid utf-8 string given") }
+
+        idx -= 1;
+    }
+
+    s.split_at(idx)
 }

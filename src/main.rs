@@ -70,7 +70,7 @@ fn compile(args: &Args, source: &str) -> error::Result<String> {
 
     if args.analyze { println!("{app}") }
 
-    let mut ir = ir::Ir::from_app(app);
+    let ir = ir::Ir::from_app(app);
     // ir.optimize();
 
     if args.ir { println!("{ir}") }

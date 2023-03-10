@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use enum_map::{EnumMap, Enum};
 use indexmap::IndexSet;
 
