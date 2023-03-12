@@ -283,13 +283,17 @@ impl Instruction {
             }
             Instruction::Load(reg, value) => {
                 // mov with 32 bit or greater operands automatically do zero-extend
-                if reg.size == value.size() {
+                // https://www.felixcloutier.com/x86/movzx
+                if value.size() >= 4 {
                     format!("mov {}, {}", reg.as_str(), value.as_operand())
-                } else if value.size() == 4 { 
-                    // mov zero extend is weird as shit for 32bit operands fuck this shit fuch life fuck me https://www.felixcloutier.com/x86/movzx
-                    format!("mov {}, {}", reg.kind.with_size(4).as_str(), value.as_operand())
                 } else {
-                    format!("movzx {}, {}", reg.as_str(), value.as_operand())
+                    let reg = if reg.size == 1 {
+                        reg.kind.with_size(2).as_str()
+                    } else {
+                        reg.as_str()
+                    };
+
+                    format!("movzx {}, {}", reg, value.as_operand())
                 }
             }
             Instruction::LoadSignExtend(reg, value) => {

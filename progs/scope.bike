@@ -10,10 +10,12 @@ func main() {
 
 	{
 		{
-			let i8 inner = 2;
+			let i32 inner = 2;
+
+			let i8 intermediate = 34;
 
 			// shadow
-			let i32 inner = <i32>inner;
+			let i8 inner = 10;
 		};
 
 		// uses the same space as the scope above

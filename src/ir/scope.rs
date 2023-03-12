@@ -27,6 +27,8 @@ pub struct Scope {
     pub variables: SlotMap<VariableKey, VariableOffset>,
     pub named_variables: HashMap<String, VariableKey>,
     pub offset: u32,
+    /// The maximum amount of space reserved by the scope, may be greater than `offset` if variables are shadowed
+    pub max_offset: u32,
     pub kind: ScopeKind
 }
 
@@ -59,16 +61,41 @@ impl ScopeTrait for Scope {
         self.variables.get(*key)
     }
 
-    fn insert(&mut self, name: String, var: Self::VariableType) -> Self::Key {
-        self.offset += var.size;
+    fn insert(&mut self, name: String, mut var: Self::VariableType) -> Self::Key {
+        if let Some(shadowed) = self.named_variables.get(&name) {
+            let shadowed = self.variables.remove(*shadowed).expect("undefined shadowed variable");
+
+            // if variable was shadowed right next to itself -> change the top of the stack however you want
+            // let _ a;
+            // let _ a;
+            if self.offset-shadowed.size == shadowed.offset {
+                self.offset -= shadowed.size;
+                var.offset = self.offset;
+
+                self.offset += var.size;
+            }
+            // if variable is shadowed later, but fits in the already allocated space
+            // let i32 a;
+            // let _ b;
+            // let i8 a;
+            else if var.size <= shadowed.size {
+                var.offset = shadowed.offset;
+            }
+            // variable is shadowed later and doesn't fit in the existing space
+            // let i8 a;
+            // let _ b;
+            // let i32 a;
+            else {
+                self.offset += var.size;
+            }
+            // of course the best would just be to always put the space for the bigger variable, but that's a bit harder
+        } else {
+            self.offset += var.size;
+        }
+        self.max_offset = self.max_offset.max(self.offset);
 
         let key = self.variables.insert(var);
-        if let Some(shadowed) = self.named_variables.insert(name, key) {
-            let shadowed = self.variables.remove(shadowed).expect("undefined shadowed variable");
-            self.offset -= shadowed.size;
-            self.variables[key].offset -= shadowed.size; // offset is set based on the top of the stack
-        }
-
+        self.named_variables.insert(name, key);
         key
     }
 

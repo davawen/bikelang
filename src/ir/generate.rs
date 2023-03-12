@@ -364,7 +364,7 @@ impl Function {
                 } else { Value::NoValue };
 
                 // get maximum stack offset
-                self.stack_offset = self.stack_offset.max(scopes.top().offset);
+                self.stack_offset = self.stack_offset.max(scopes.top().max_offset);
                 scopes.pop();
 
                 out
