@@ -79,7 +79,7 @@ impl Address {
 impl Value {
     fn as_operand(&self) -> String {
         match self {
-            &Value::Number(x, size) => format!("{} {x}", word_size(size)),
+            &Value::Number(x, _size) => format!("{x}"),
             &Value::Boolean(x) => if x { "BYTE 1".to_owned() } else { "BYTE 0".to_owned() },
             &Value::Register(reg) => reg.as_str().to_owned(),
             Value::Literal(idx) => format!("user_str{idx}"),
@@ -287,13 +287,13 @@ impl Instruction {
                 if value.size() >= 4 {
                     format!("mov {}, {}", reg.as_str(), value.as_operand())
                 } else {
-                    let reg = if reg.size == 1 {
-                        reg.kind.with_size(2).as_str()
-                    } else {
-                        reg.as_str()
-                    };
+                    let reg = reg.kind.with_size(4).as_str();
 
-                    format!("movzx {}, {}", reg, value.as_operand())
+                    if matches!(value, Value::Register(_)) {
+                        format!("movzx {}, {}", reg, value.as_operand())
+                    } else {
+                        format!("mov {}, {}", reg, value.as_operand())
+                    }
                 }
             }
             Instruction::LoadSignExtend(reg, value) => {
