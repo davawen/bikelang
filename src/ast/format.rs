@@ -16,10 +16,10 @@ impl Display for Ast {
                 let b = if *b { "TRUE" } else { "FALSE" };
                 ( format!("{ORANGE}{b}"), None )
             }
-            Node::Definition { typename, name } => ( format!("DEF {name}: {CYAN}{typename:?}"), None ),
+            Node::Definition { ty: _, typename, name } => ( format!("DEF {name}: {CYAN}{typename:?}"), None ),
             Node::Break => ( "BREAK".to_string(), None ),
             Node::Empty => ( "EMPTY".to_string(), None ),
-            Node::Convert(box expr, ty) => ( format!("CONVERT TO {ty:?}"), Some(vec![format!("{expr}")]) ),
+            Node::Convert(box expr, typename, _) => ( format!("CONVERT TO {typename:?}"), Some(vec![format!("{expr}")]) ),
             Node::Return(box expr, ..) => ( format!("{PURPLE}RETURN"), Some(vec![format!("{expr}")]) ),
             Node::Statement(inner) => {
                 ( "STATEMENT".to_string(), Some(vec![format!("{inner}")]) )

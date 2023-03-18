@@ -74,8 +74,8 @@ impl Function {
     /// Invariant: app's function_bodies can't be used!
     fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, scopes: &mut ScopeStack<Scope>, ast: ast::Ast) -> Value {
         match ast.node {
-            ast::Node::Definition { name, typename } => {
-                insert_declaration(scopes, name, typename);
+            ast::Node::Definition { name, ty, typename: _ } => {
+                insert_declaration(scopes, name, ty);
 
                 Value::NoValue
             }
@@ -84,8 +84,8 @@ impl Function {
                 let rhs = self.fold_node(ir, app, scopes, rhs);
 
                 let address = match lhs.node {
-                    ast::Node::Definition { name, typename } => {
-                        let var = insert_declaration(scopes, name, typename);
+                    ast::Node::Definition { name, ty, typename: _ } => {
+                        let var = insert_declaration(scopes, name, ty);
                         scopes.get_index(var).into()
                     }
                     ast::Node::Identifier(var, _) => {
@@ -172,7 +172,7 @@ impl Function {
                 self.instructions.push(ins);
                 Value::Register(out)
             }
-            ast::Node::Convert(box expr, ty) => {
+            ast::Node::Convert(box expr, _, ty) => {
                 // Only do sign-extend with signed->signed conversions
                 // Which skips conversion entirely in same-sized signed->unsigned conversions
                 // unsigned->bigger signed = You want to keep the upper values

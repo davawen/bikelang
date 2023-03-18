@@ -53,7 +53,7 @@ impl Mode for ExpressionMode {
 
                 Ast::new(
                     item.bounds.with_end_of(operand.bounds),
-                    Node::Convert(operand, convert_to)
+                    Node::Convert(operand, convert_to, Type::Void)
                 )
             }
             Op(op) => {
@@ -88,6 +88,7 @@ impl Mode for ExpressionMode {
 
                         Node::Definition {
                             typename,
+                            ty: Type::Void,
                             name
                         }.ast(item.bounds.with_end_of(rbounds))
                     }
@@ -102,7 +103,7 @@ impl Mode for ExpressionMode {
                             lexer.next();
                             pratt(&TypeMode, lexer, 0)?
                         } else {
-                            Type::Void
+                            TypeNode::Typename("void".to_owned())
                         };
 
                         let body = box parse_block(lexer.next(), lexer)?;
@@ -248,7 +249,7 @@ impl Mode for ExpressionMode {
 
 struct TypeMode;
 impl Mode for TypeMode {
-    type Output = Type;
+    type Output = TypeNode;
 
     fn lbp(&self, item: &Item) -> Result<u32> {
         use Token::*;
@@ -266,10 +267,10 @@ impl Mode for TypeMode {
         let node = match item.token {
             Op(Operation::Times) => {
                 let inner = pratt(self, lexer, 60)?;
-                inner.into_ptr()
+                TypeNode::Ptr(box inner)
             },
             Word(typename) => {
-                Type::from_str(&typename).at(item.bounds)?
+                TypeNode::Typename(typename)
             }
             token => return Err(AstError::UnexpectedToken("cannot create type from token", token)).at(item.bounds)
         };
@@ -315,6 +316,7 @@ fn parameter_list(lexer: &mut Lexer) -> Result<Vec<Ast>> {
 
                 Node::Definition {
                     typename,
+                    ty: Type::Void,
                     name
                 }.ast(start.with_end_of(rbounds))
             };

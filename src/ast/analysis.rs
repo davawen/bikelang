@@ -5,7 +5,7 @@ use itertools::Itertools;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
-use crate::{utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType, TypeDescriptor}, super_type_or, error::{Result, ToCompilerError}, scope::{ScopeTrait, ScopeStack}, };
+use crate::{utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType, TypeDescriptor, TypeHolder}, super_type_or, error::{Result, ToCompilerError}, scope::{ScopeTrait, ScopeStack}, };
 use super::{Ast, node::{Node, Intrisic, BinaryOperation, UnaryOperation}};
 
 pub type FunctionIndex = usize;
@@ -16,7 +16,7 @@ pub type VariableIndex = usize;
 pub struct App {
     pub function_definitions: IndexMap<String, Function>,
     pub function_bodies: Vec<FunctionBody>,
-    // pub types: IndexMap<String, Type>,
+    pub types: TypeHolder,
 }
 
 #[derive(Debug)]
@@ -37,6 +37,25 @@ pub struct FunctionBody {
 #[derive(Debug, Clone, Default)]
 pub struct Scope {
     pub variables: IndexMap<String, Type>,
+    deferred_variable: Option<(String, Type)>,
+    deferred: bool
+}
+
+impl Scope {
+    /// Don't directly add the next declaration
+    fn defer(&mut self) {
+        self.deferred = true;
+    }
+
+    /// Declare the deferred variable if any
+    fn apply_defer(&mut self) {
+        if self.deferred {
+            self.deferred = false;
+            if let Some((name, var)) = self.deferred_variable.take() {
+                self.insert(name, var);
+            }
+        }
+    }
 }
 
 impl ScopeTrait for Scope {
@@ -47,14 +66,29 @@ impl ScopeTrait for Scope {
         self.variables.get(name)
     }
 
+    /// # Panics
+    /// This function panics if the scope is deferred, but a deferred variable is already set 
+    /// Such as to not create invalid indices and to not lose a declaration
+    /// NOTE: No `unsafe`, but pretty unsafe stuff is hapenning
     fn insert(&mut self, name: String, var: Self::VariableType) -> Self::Key {
-        self.variables.insert_full(name, var).0
+        if !self.deferred {
+            self.variables.insert_full(name, var).0
+        } else {
+            if self.deferred_variable.is_some() {
+                panic!("Trying to insert a variable({name}, {var:?}) when another one is already deferred({:?})", self.deferred_variable)
+            }
+
+            self.deferred_variable = Some((name, var));
+            // Index will be valid once deferred is applied
+            // Although this mean an index cannot technically be considered valid after an insert
+            // But it's fine in its usage and will panic instead of giving wrong results
+            self.variables.len()
+        }
     }
 
     fn get_index(&self, idx: Self::Key) -> &Self::VariableType {
         &self.variables[idx]
     }
-    
 }
 
 #[derive(Debug, Clone, Error)]
@@ -79,9 +113,9 @@ impl Function {
         let Node::FuncDef { name, return_type, parameter_list, box body } = definition.node
             else { return Err(AnalysisError::WrongNodeType("no function definition given", definition.node)).at(definition.bounds) };
 
-        let parameters =  parameter_list.into_iter().map(|p| {
-            if let Node::Definition { name, typename } = p.node {
-                Ok((name, typename))
+        let parameters = parameter_list.into_iter().map(|p| {
+            if let Node::Definition { name, typename, ty: _ } = p.node {
+                Ok((name, Type::from_node(&typename, &app.types).at(p.bounds)?))
             } else { 
                 Err(AnalysisError::WrongNodeType("an argument definition", p.node)).at(p.bounds)
             }
@@ -96,7 +130,7 @@ impl Function {
             name,
             Self {
                 parameters,
-                return_type,
+                return_type: Type::from_node(&return_type, &app.types).at(definition.bounds)?,
                 body,
             },
         );
@@ -139,10 +173,12 @@ impl Ast {
                 Ok(typename.clone().addressable())
             }
             // This place defines variables in the scope!
-            Node::Definition { name, typename } => {
-                scopes.insert(name.clone(), typename.clone());
+            Node::Definition { name, typename, ty } => {
+                *ty = Type::from_node(typename, &app.types).at(self.bounds)?;
 
-                Ok(typename.clone().addressable())
+                scopes.insert(name.clone(), ty.clone());
+
+                Ok(ty.clone().addressable())
             },
             Node::Intrisic(intrisic) => {
                 match intrisic {
@@ -206,15 +242,14 @@ impl Ast {
                 Ok(descriptor)
             }
             Node::Expr { op: BinaryOperation::Assignment, ty: _, box lhs, box rhs } => {
-                // TODO: Find a better way to deal with expected type
-                let expected_type = if let Node::Definition { typename, .. } = &lhs.node {
-                    Some(typename)
-                } else { None };
+                scopes.top_mut().defer();
 
-                let rhs_type = rhs.set_type(app, definition, scopes, expected_type)?;
+                let expected_type = lhs.set_type(app, definition, scopes, None)?;
+                let rhs_type = rhs.set_type(app, definition, scopes, Some(&expected_type.ty))?;
+
+                scopes.top_mut().apply_defer();
                 
                 // Parse definition after expression
-                let expected_type = lhs.set_type(app, definition, scopes, None)?;
                 // Can't assign to r-value
                 if !expected_type.has_address {
                     return Err(AnalysisError::WrongNodeType("given node isn't assignable to", lhs.node.clone())).at_ast(lhs);
@@ -264,7 +299,9 @@ impl Ast {
 
                 Ok(descriptor)
             }
-            Node::Convert(box expr, ty) => {
+            Node::Convert(box expr, typename, ty) => {
+                *ty = Type::from_node(typename, &app.types).at(self.bounds)?;
+
                 let expr_type = expr.set_type(app, definition, scopes, Some(ty))?;
 
                 let output = ty.clone(); // Weird ownership shit?
@@ -336,7 +373,7 @@ impl Ast {
             Node::UnaryExpr { ty, .. } => ty,
             Node::Expr { ty, .. } => ty,
             Node::Block { inner: _, ty } => ty,
-            Node::Convert(_, ty) => ty,
+            Node::Convert(_, _, ty) => ty,
             Node::Number(_, ty) => ty,
             Node::Identifier(_, ty) => ty,
             Node::BoolLiteral(_) => &Type::Boolean,
@@ -355,7 +392,9 @@ impl FunctionBody {
 
         let mut stack = ScopeStack::from_top(
             Scope {
-                variables: IndexMap::from_iter(definition.parameters.iter().cloned())
+                variables: IndexMap::from_iter(definition.parameters.iter().cloned()),
+                deferred_variable: None,
+                deferred: false
             }
         );
 
@@ -380,6 +419,7 @@ impl App {
         Self {
             function_definitions: IndexMap::new(),
             function_bodies: Vec::new(),
+            types: TypeHolder::with_builtins()
         }
     }
 
@@ -399,26 +439,29 @@ impl App {
     pub fn type_check(mut self) -> Result<Self> {
         // We do a little trickery
         // Allow borrowing the function definitions without borrowing self
-        // We don't need the bodies during type checking anyway
-        let this = App {
-            function_definitions: self.function_definitions,
-            function_bodies: Vec::new()
-        };
+        // Although it means you don't have access to the function bodies while iterating, but that's not necessarly a problem
+        let mut bodies = std::mem::take(&mut self.function_bodies);
 
-        for function in &mut self.function_bodies {
-            function.type_check(&this)?;
+        for function in &mut bodies {
+            function.type_check(&self)?;
         }
 
-        self.function_definitions = this.function_definitions;
+        self.function_bodies = bodies;
         Ok(self)
     }
 }
 
 impl Display for App {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const WHITE: &str = "\x1b[0m";
-        const CYAN: &str = "\x1b[36m";
-        const GRAY: &str = "\x1b[90m";
+        use crate::utility::color::{GRAY, WHITE, CYAN, GREEN};
+
+        writeln!(f, "TYPES")?;
+        for (idx, (name, ty)) in self.types.types.iter().enumerate() {
+            let connector = if idx == self.types.types.len()-1 { '╰' } else { '├' } ;
+
+            writeln!(f, "{GRAY}{connector} {GREEN}\"{name}\" = {CYAN}{ty:?}")?;
+        }
+        writeln!(f, "{WHITE}")?;
 
         for (name, func) in &self.function_definitions {
             writeln!(f, "FUNC {name}")?;

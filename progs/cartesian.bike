@@ -1,4 +1,6 @@
 func main() -> void {
+	print#("\n");
+
     let i32 j = 0;
     print#("Cartesian product: \n");
 

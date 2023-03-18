@@ -230,6 +230,7 @@ impl Intrisic {
             Asm(Value::Literal(inner)) => {
                 ir.literals[*inner].clone()
             }
+            Asm(_) => unreachable!(),
             PrintNumber(v, ty) => {
                 let is_rax = matches!(v, Value::Register(Register{ kind: RegisterKind::Rax, .. }));
                 fmtools::format!(
@@ -266,7 +267,7 @@ impl Intrisic {
                     "syscall\n"
                 )
             }
-            _ => todo!("Intrisics not all set lol: {self:#?}")
+            PrintString(_) => unreachable!()
         }
     }
 }

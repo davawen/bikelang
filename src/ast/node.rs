@@ -2,12 +2,13 @@ use crate::{typed::Type, utility::Bounds, token::Item};
 
 use super::Ast;
 
+/// Invariant: ALL types in nodes are uninitialized (set to `Type::Void`) until `analysis` phase
 #[derive(Debug, Clone)]
 pub enum Node {
     FuncDef {
         name: String,
         parameter_list: Vec<Ast>,
-        return_type: Type,
+        return_type: TypeNode,
         body: Box<Ast>,
     },
     Call {
@@ -40,7 +41,7 @@ pub enum Node {
     Intrisic(Intrisic),
     Statement(Box<Ast>),
     /// Converts it's expression to another type
-    Convert(Box<Ast>, Type), 
+    Convert(Box<Ast>, TypeNode, Type), 
     Empty,
     Block { 
         inner: Vec<Ast>,
@@ -51,9 +52,16 @@ pub enum Node {
     BoolLiteral(bool),
     Identifier(String, Type),
     Definition {
-        typename: Type,
+        typename: TypeNode,
+        ty: Type,
         name: String,
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeNode {
+    Typename(String),
+    Ptr(Box<TypeNode>)
 }
 
 #[derive(Debug, Clone)]

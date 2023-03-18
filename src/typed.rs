@@ -1,4 +1,45 @@
+use std::collections::HashMap;
+
 use thiserror::Error;
+
+use crate::ast::TypeNode;
+
+#[derive(Debug)]
+pub struct TypeHolder {
+    pub types: HashMap<String, Type>
+}
+
+impl TypeHolder {
+    pub fn with_builtins() -> Self {
+        use Type::*;
+        Self {
+            types: HashMap::from([
+                ("u8".to_owned(), UInt8),
+                ("i8".to_owned(), Int8),
+                ("u32".to_owned(), UInt32),
+                ("i32".to_owned(), Int32),
+                ("u64".to_owned(), UInt64),
+                ("i64".to_owned(), Int64),
+                ("f32".to_owned(), Float32),
+                ("bool".to_owned(), Boolean),
+                ("str".to_owned(), Ptr(box UInt8)),
+                ("void".to_owned(), Void),
+            ])
+        }
+    }
+
+    pub fn get_ty(&self, name: &str) -> Result<&Type> {
+        if let Some(ty) = self.types.get(name) {
+            Ok(ty)
+        } else {
+            Err(TypeError::Unknown(name.to_owned()))
+        }
+    }
+
+    pub fn insert(&mut self, name: String, ty: Type) {
+        self.types.insert(name, ty);
+    }
+}
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -45,6 +86,13 @@ pub enum TypeError {
 pub type Result<T> = std::result::Result<T, TypeError>;
 
 impl Type {
+    pub fn from_node(node: &TypeNode, types: &TypeHolder) -> Result<Self> {
+        match node {
+            TypeNode::Typename(name) => types.get_ty(name).cloned(),
+            TypeNode::Ptr(box inner) => Self::from_node(inner, types).map(Self::into_ptr)
+        }
+    }
+
     /// Size of the type in bytes
     pub fn size(&self) -> u32 {
         use Type::*;
@@ -57,24 +105,6 @@ impl Type {
             Ptr(_) => 8,
             Void => 0,
         }
-    }
-
-    pub fn from_str(name: &str) -> Result<Self> {
-        use Type::*;
-        let ty = match name {
-            "u8" => UInt8,
-            "i8" => Int8,
-            "u32" => UInt32,
-            "i32" => Int32,
-            "u64" => UInt64,
-            "i64" => Int64,
-            "f32" => Float32,
-            "bool" => Boolean,
-            "str" => Self::string(),
-            "void" => Void,
-            _ => return Err(TypeError::Unknown(name.to_owned())),
-        };
-        Ok(ty)
     }
 
     pub fn expect(self, expected: SuperType, msg: &'static str) -> Result<Self> {
