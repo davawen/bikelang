@@ -1,0 +1,7 @@
+func main() {
+	let int test = 10;
+
+	print#("test is: ", test);
+}
+
+// type int = i32;

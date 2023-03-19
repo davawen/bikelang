@@ -10,8 +10,8 @@ mod format;
 pub use node::*;
 
 #[derive(Debug, Clone)]
-pub struct Ast {
-    pub node: Node,
+pub struct Ast<T = Node> {
+    pub node: T,
     pub bounds: Bounds
 }
 
@@ -31,8 +31,8 @@ pub enum AstError {
     UnknownIntrisic(String)
 }
 
-impl Ast {
-    fn new(bounds: Bounds, node: Node) -> Self {
+impl<T> Ast<T> {
+    fn new(bounds: Bounds, node: T) -> Self {
         Ast {
             node,
             bounds

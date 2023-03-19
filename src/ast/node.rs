@@ -8,7 +8,7 @@ pub enum Node {
     FuncDef {
         name: String,
         parameter_list: Vec<Ast>,
-        return_type: TypeNode,
+        return_type: Ast<TypeNode>,
         body: Box<Ast>,
     },
     Call {
@@ -41,7 +41,7 @@ pub enum Node {
     Intrisic(Intrisic),
     Statement(Box<Ast>),
     /// Converts it's expression to another type
-    Convert(Box<Ast>, TypeNode, Type), 
+    Convert(Box<Ast>, Ast<TypeNode>, Type), 
     Empty,
     Block { 
         inner: Vec<Ast>,
@@ -52,7 +52,7 @@ pub enum Node {
     BoolLiteral(bool),
     Identifier(String, Type),
     Definition {
-        typename: TypeNode,
+        typename: Ast<TypeNode>,
         ty: Type,
         name: String,
     },
@@ -61,7 +61,7 @@ pub enum Node {
 #[derive(Debug, Clone)]
 pub enum TypeNode {
     Typename(String),
-    Ptr(Box<TypeNode>)
+    Ptr(Box<Ast<TypeNode>>)
 }
 
 #[derive(Debug, Clone)]

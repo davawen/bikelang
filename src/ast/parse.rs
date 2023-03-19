@@ -103,7 +103,7 @@ impl Mode for ExpressionMode {
                             lexer.next();
                             pratt(&TypeMode, lexer, 0)?
                         } else {
-                            TypeNode::Typename("void".to_owned())
+                            Ast::new(lexer.peek().bounds, TypeNode::Typename("void".to_owned()))
                         };
 
                         let body = Box::new(parse_block(lexer.next(), lexer)?);
@@ -250,7 +250,7 @@ impl Mode for ExpressionMode {
 
 struct TypeMode;
 impl Mode for TypeMode {
-    type Output = TypeNode;
+    type Output = Ast<TypeNode>;
 
     fn lbp(&self, item: &Item) -> Result<u32> {
         use Token::*;
@@ -268,10 +268,10 @@ impl Mode for TypeMode {
         let node = match item.token {
             Op(Operation::Times) => {
                 let inner = pratt(self, lexer, 60)?;
-                TypeNode::Ptr(Box::new(inner))
+                Ast::new(item.bounds.with_end_of(inner.bounds), TypeNode::Ptr(Box::new(inner)))
             },
             Word(typename) => {
-                TypeNode::Typename(typename)
+                Ast::new(item.bounds, TypeNode::Typename(typename))
             }
             token => return Err(AstError::UnexpectedToken("cannot create type from token", token)).at(item.bounds)
         };

@@ -115,7 +115,7 @@ impl Function {
 
         let parameters = parameter_list.into_iter().map(|p| {
             if let Node::Definition { name, typename, ty: _ } = p.node {
-                Ok((name, Type::from_node(&typename, &app.types).at(p.bounds)?))
+                Ok((name, Type::from_node(&typename, &app.types)?))
             } else { 
                 Err(AnalysisError::WrongNodeType("an argument definition", p.node)).at(p.bounds)
             }
@@ -130,7 +130,7 @@ impl Function {
             name,
             Self {
                 parameters,
-                return_type: Type::from_node(&return_type, &app.types).at(definition.bounds)?,
+                return_type: Type::from_node(&return_type, &app.types)?,
                 body,
             },
         );
@@ -174,7 +174,7 @@ impl Ast {
             }
             // This place defines variables in the scope!
             Node::Definition { name, typename, ty } => {
-                *ty = Type::from_node(typename, &app.types).at(self.bounds)?;
+                *ty = Type::from_node(typename, &app.types)?;
 
                 scopes.insert(name.clone(), ty.clone());
 
@@ -300,7 +300,7 @@ impl Ast {
                 Ok(descriptor)
             }
             Node::Convert(box expr, typename, ty) => {
-                *ty = Type::from_node(typename, &app.types).at(self.bounds)?;
+                *ty = Type::from_node(typename, &app.types)?;
 
                 let expr_type = expr.set_type(app, definition, scopes, Some(ty))?;
 

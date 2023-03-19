@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::ast::TypeNode;
+use crate::{ast::{TypeNode, Ast}, error::{CompilerError, ToCompilerError}};
 
 #[derive(Debug)]
 pub struct TypeHolder {
@@ -86,9 +86,9 @@ pub enum TypeError {
 pub type Result<T> = std::result::Result<T, TypeError>;
 
 impl Type {
-    pub fn from_node(node: &TypeNode, types: &TypeHolder) -> Result<Self> {
-        match node {
-            TypeNode::Typename(name) => types.get_ty(name).cloned(),
+    pub fn from_node(ast: &Ast<TypeNode>, types: &TypeHolder) -> std::result::Result<Self, CompilerError> {
+        match &ast.node {
+            TypeNode::Typename(name) => types.get_ty(name).cloned().at(ast.bounds),
             TypeNode::Ptr(box inner) => Self::from_node(inner, types).map(Self::into_ptr)
         }
     }
