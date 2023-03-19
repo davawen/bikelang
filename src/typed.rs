@@ -22,7 +22,7 @@ impl TypeHolder {
                 ("i64".to_owned(), Int64),
                 ("f32".to_owned(), Float32),
                 ("bool".to_owned(), Boolean),
-                ("str".to_owned(), Ptr(box UInt8)),
+                ("str".to_owned(), Ptr(Box::new(UInt8))),
                 ("void".to_owned(), Void),
             ])
         }
@@ -131,7 +131,7 @@ impl Type {
 
     /// Creates a Type::Ptr from to this Type
     pub fn into_ptr(self) -> Self {
-        Type::Ptr(box self)
+        Type::Ptr(Box::new(self))
     }
     /// Creates a TypeDescriptor from this Type which allows you to take its address
     pub fn addressable(self) -> TypeDescriptor {
@@ -210,10 +210,10 @@ impl From<Type> for SuperType {
 #[macro_export]
 macro_rules! super_type_or {
     ($a:expr, $b:expr) => {
-        SuperType::Or(box $a.into(), box $b.into())
+        SuperType::Or(Box::new($a.into()), Box::new($b.into()))
     };
     ($a:expr, $b:expr $(, $more:expr)+) => {
-        SuperType::Or(box $a.into(), box super_type_or!($b $(, $more)+))
+        SuperType::Or(Box::new($a.into()), Box::new(super_type_or!($b $(, $more)+)))
     };
 }
 

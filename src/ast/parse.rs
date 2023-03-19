@@ -49,7 +49,7 @@ impl Mode for ExpressionMode {
                 let convert_to = pratt(&TypeMode, lexer, 0)?;
                 lexer.expect(Token::Op(Operation::Greater))?;
 
-                let operand = box pratt(self, lexer, 60)?;
+                let operand = Box::new(pratt(self, lexer, 60)?);
 
                 Ast::new(
                     item.bounds.with_end_of(operand.bounds),
@@ -65,7 +65,7 @@ impl Mode for ExpressionMode {
                     _ => return Err(AstError::WrongOperation(op, "as a prefix operator")).at_item(&item)
                 };
 
-                let value = box pratt(self, lexer, power)?;
+                let value = Box::new(pratt(self, lexer, power)?);
                 Ast::new(
                     item.bounds.with_end_of(value.bounds),
                     Node::UnaryExpr {
@@ -106,7 +106,7 @@ impl Mode for ExpressionMode {
                             TypeNode::Typename("void".to_owned())
                         };
 
-                        let body = box parse_block(lexer.next(), lexer)?;
+                        let body = Box::new(parse_block(lexer.next(), lexer)?);
                         Ast::new(
                             item.bounds.with_end_of(body.bounds),
                             Node::FuncDef {
@@ -118,8 +118,8 @@ impl Mode for ExpressionMode {
                         )
                     }
                     If => {
-                        let condition = box pratt(self, lexer, 1)?;
-                        let body = box parse_block(lexer.next(), lexer)?;
+                        let condition = Box::new(pratt(self, lexer, 1)?);
+                        let body = Box::new(parse_block(lexer.next(), lexer)?);
                         Ast::new(
                             item.bounds.with_end_of(body.bounds),
                             Node::If {
@@ -131,7 +131,7 @@ impl Mode for ExpressionMode {
                         )
                     }
                     Loop => {
-                        let body = box parse_block(lexer.next(), lexer)?;
+                        let body = Box::new(parse_block(lexer.next(), lexer)?);
                         Ast::new(
                             item.bounds.with_end_of(body.bounds),
                             Node::Loop {
@@ -141,7 +141,8 @@ impl Mode for ExpressionMode {
                     }
                     Break => Node::Break.ast(item.bounds),
                     Return => {
-                        let expr = box pratt(self, lexer, 0)?;
+
+                        let expr = Box::new(pratt(self, lexer, 0)?);
                         Ast::new(item.bounds.with_end_of(expr.bounds), Node::Return(expr))
                     }
                     True => Ast::new(item.bounds, Node::BoolLiteral(true)),
@@ -189,13 +190,13 @@ impl Mode for ExpressionMode {
                     Exclamation | AddressOf => unreachable!() // error emitted in left_binding_power()
                 };
 
-                let rhs = box pratt(self, lexer, power)?;
+                let rhs = Box::new(pratt(self, lexer, power)?);
                 Ast::new(
                     left.bounds.with_end_of(rhs.bounds),
                     Node::Expr {
                         op,
                         ty: Type::Void,
-                        lhs: box left,
+                        lhs: Box::new(left),
                         rhs
                     }
                 )
@@ -219,7 +220,7 @@ impl Mode for ExpressionMode {
                 let (list, rtoken) = argument_list(lexer)?;
 
                 let intrisic = match name.as_str() {
-                    "asm" => Intrisic::Asm(box list.into_iter().next().unwrap()),
+                    "asm" => Intrisic::Asm(Box::new(list.into_iter().next().unwrap())),
                     "print" => Intrisic::Print(list),
                     _ => return Err(AstError::UnknownIntrisic(name)).at(left.bounds)
                 };
@@ -231,9 +232,9 @@ impl Mode for ExpressionMode {
 
                 let else_body = match lexer.peek().token {
                     Keyword(token::Keyword::If) => {
-                        box pratt(self, lexer, 0)?
+                        Box::new(pratt(self, lexer, 0)?)
                     },
-                    _ => box parse_block(lexer.next(), lexer)?
+                    _ => Box::new(parse_block(lexer.next(), lexer)?)
                 };
                 Ast::new(
                     left.bounds.with_end_of(else_body.bounds),
@@ -267,7 +268,7 @@ impl Mode for TypeMode {
         let node = match item.token {
             Op(Operation::Times) => {
                 let inner = pratt(self, lexer, 60)?;
-                TypeNode::Ptr(box inner)
+                TypeNode::Ptr(Box::new(inner))
             },
             Word(typename) => {
                 TypeNode::Typename(typename)
@@ -369,7 +370,7 @@ fn parse_block_vec(lexer: &mut Lexer) -> Result<(Vec<Ast>, Item)> {
         let next = lexer.peek();
 
         if next.token == Token::Semicolon {
-            block.push(Ast::new(expr.bounds.with_end_of(next.bounds), Node::Statement(box expr)));
+            block.push(Ast::new(expr.bounds.with_end_of(next.bounds), Node::Statement(Box::new(expr))));
             lexer.next();
         }
         else {

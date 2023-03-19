@@ -1,4 +1,4 @@
-#![feature(box_syntax, box_patterns, if_let_guard, default_free_fn, result_option_inspect)]
+#![feature(box_patterns, if_let_guard, default_free_fn, result_option_inspect)]
 
 use std::fs;
 use clap::Parser;
