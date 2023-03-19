@@ -1,0 +1,12 @@
+struct Simple {
+	i32 a,
+	i32 b
+}
+
+func main() {
+	let Simple b;
+	let *i32 a_field = <*i32><u64>&b;
+	// b.a = 10; member acess isn't defined yet
+
+	print#("a is: ", *a_field, "\n");
+}

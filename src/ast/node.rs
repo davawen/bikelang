@@ -11,6 +11,10 @@ pub enum Node {
         return_type: Ast<TypeNode>,
         body: Box<Ast>,
     },
+    StructDef {
+        name: String,
+        fields: Vec<(String, Ast<TypeNode>)>,
+    },
     TypeAlias {
         lhs: String,
         rhs: Ast<TypeNode>

@@ -5,8 +5,8 @@ use itertools::Itertools;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
-use crate::{utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType, TypeDescriptor, TypeHolder}, super_type_or, error::{Result, ToCompilerError}, scope::{ScopeTrait, ScopeStack}, };
-use super::{Ast, node::{Node, Intrisic, BinaryOperation, UnaryOperation}};
+use crate::{utility::{PushIndex, Transmit, Bounds}, typed::{TypeError, Type, SuperType, TypeDescriptor, TypeHolder}, super_type_or, error::{Result, ToCompilerError}, scope::{ScopeTrait, ScopeStack}, };
+use super::{Ast, node::{Node, Intrisic, BinaryOperation, UnaryOperation}, TypeNode};
 
 pub type FunctionIndex = usize;
 pub type FunctionBodyIndex = usize;
@@ -145,21 +145,33 @@ impl Function {
 
 impl Type {
     fn is_declaration(node: &Node) -> bool {
-        matches!(node, Node::TypeAlias { .. })
+        matches!(node, Node::TypeAlias { .. } | Node::StructDef { .. })
     }
 
     fn insert(app: &mut App, definition: Ast) -> Result<()> {
-        let Node::TypeAlias { lhs, rhs } = definition.node else { unreachable!() };
+        match definition.node {
+            Node::TypeAlias { lhs, rhs } => {
+                if app.types.types.contains_key(&lhs) {
+                    return Err(AnalysisError::TypeRedefinition(lhs)).at(definition.bounds);
+                }
+                let rhs = Type::from_node(&rhs, &app.types)?;
 
-        let rhs = Type::from_node(&rhs, &app.types)?;
+                app.types.insert(lhs, rhs);
+                Ok(())
+            },
+            Node::StructDef { name, fields } => {
+                if app.types.types.contains_key(&name) {
+                    return Err(AnalysisError::TypeRedefinition(name)).at(definition.bounds);
+                }
+                let fields = fields.into_iter()
+                    .map(|(name, ty)| Ok((name, Type::from_node(&ty, &app.types)?)))
+                    .collect::<Result<_>>()?;
 
-        if app.types.types.contains_key(&lhs) {
-            return Err(AnalysisError::TypeRedefinition(lhs)).at(definition.bounds);
+                app.types.insert(name, Type::Struct { fields });
+                Ok(())
+            },
+            _ => unreachable!()
         }
-
-        app.types.insert(lhs, rhs);
-
-        Ok(())
     }
 }
 
@@ -383,7 +395,7 @@ impl Ast {
                 Ok(Type::Void.into())
             }
             Node::Empty => Ok(Type::Void.into()),
-            Node::FuncDef { .. } | Node::TypeAlias { .. } => {
+            Node::FuncDef { .. } | Node::TypeAlias { .. } | Node::StructDef { .. } => {
                 Err(AnalysisError::WrongNodeType("node only available at global scope", self.node.clone())).at_ast(self)
             }
         }
@@ -401,7 +413,7 @@ impl Ast {
             Node::BoolLiteral(_) => &Type::Boolean,
             Node::StringLiteral(_) => return Type::string(),
             Node::If { ty, .. } => ty,
-            Node::Statement(..) | Node::FuncDef { .. } | Node::TypeAlias { .. } | Node::Loop { .. }
+            Node::Statement(..) | Node::FuncDef { .. } | Node::TypeAlias { .. } | Node::StructDef { .. } | Node::Loop { .. }
                 | Node::Return(..) | Node::Break | Node::Intrisic(..) | Node::Empty
                 | Node::Definition { .. } => &Type::Void
         }.clone()
@@ -450,9 +462,12 @@ impl App {
             else { return Err(AnalysisError::WrongNodeType("A list of top-level statements", root.node.clone())).at_ast(&root) };
 
         // Go over every type declaration first
-        for idx in 0..root.len() {
+        let mut idx = 0;
+        while idx < root.len() {
             if Type::is_declaration(&root[idx].node) {
                 Type::insert(self, root.swap_remove(idx))?;
+            } else {
+                idx += 1;
             }
         }
 

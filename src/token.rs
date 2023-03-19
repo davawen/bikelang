@@ -49,7 +49,8 @@ pub enum Keyword {
     Return,
     True,
     False,
-    TypeKeyword
+    TypeKeyword,
+    Struct
 }
 
 impl FromStr for Keyword {
@@ -66,6 +67,7 @@ impl FromStr for Keyword {
             "true" => Keyword::True,
             "false" => Keyword::False,
             "type" => Keyword::TypeKeyword,
+            "struct" => Keyword::Struct,
             _ => return Err(())
         };
 

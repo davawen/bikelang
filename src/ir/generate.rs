@@ -382,7 +382,7 @@ impl Function {
             ast::Node::StringLiteral(s) => Value::Literal(ir.push_literal(s)),
             ast::Node::BoolLiteral(b) => Value::Boolean(b),
             ast::Node::Empty => Value::NoValue,
-            ast::Node::FuncDef { .. } | ast::Node::TypeAlias { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {self:#?}"),
+            ast::Node::FuncDef { .. } | ast::Node::TypeAlias { .. } | ast::Node::StructDef { .. } => unreachable!("this ast node shouldn't be given to ir generation, got: {self:#?}"),
         }
     }
 

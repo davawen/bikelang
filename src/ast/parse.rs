@@ -13,7 +13,6 @@ trait Mode {
 }
 
 struct ExpressionMode;
-
 impl Mode for ExpressionMode {
     type Output = Ast;
 
@@ -129,6 +128,37 @@ impl Mode for ExpressionMode {
                         Ast::new(
                             item.bounds.with_end_of(rhs.bounds),
                             Node::TypeAlias { lhs, rhs }
+                        )
+                    }
+                    Struct => {
+                        macro_rules! let_word {
+                            ($bind:ident, $msg:literal) => {
+                                let t = lexer.next();
+                                let Word($bind) = t.token
+                                    else { return Err(AstError::UnexpectedToken($msg, t.token)).at(t.bounds) };
+                            };
+                        }
+
+                        let_word!(name, "expected the name of the  struct");
+
+                        lexer.expect(Brace(Dir::Left))?;
+
+                        let mut fields = Vec::new();
+                        while lexer.peek().token != Brace(Dir::Right) {
+                            let ty = pratt(&TypeMode, lexer, 0)?;
+                            let_word!(field, "expected the name of the field");
+                            fields.push((field, ty));
+
+                            if lexer.peek().token == Token::Comma {
+                                lexer.next();
+                            }
+                        }
+
+                        let end = lexer.expect(Brace(Dir::Right))?;
+
+                        Ast::new(
+                            item.bounds.with_end_of(end.bounds),
+                            Node::StructDef { name, fields }
                         )
                     }
                     If => {
@@ -298,6 +328,27 @@ impl Mode for TypeMode {
     }
 }
 
+// struct StructMode;
+// impl Mode for StructMode {
+//     type Output = Ast<(String, Type)>;
+//
+//     fn lbp(&self, item: &Item) -> Result<u32> {
+//         use Token::*;
+//         let out = match &item.token {
+//             Word(_) => 10,
+//             Comma => 0,
+//             token => return Err(AstError::UnexpectedToken("cannot use this token in struct definition", token.clone())).at_item(item)
+//         };
+//         Ok(out)
+//     }
+//
+//     fn nud(&self, item: Item, lexer: &mut Lexer) -> Result<Self::Output> {
+//         use Token::*;
+//         match item.token {
+//             
+//         }
+//     }
+// }
 
 impl Item {
     fn lbp<T>(&self, mode: &dyn Mode<Output = T>) -> Result<u32> {

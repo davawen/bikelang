@@ -41,6 +41,8 @@ impl TypeHolder {
     }
 }
 
+// FIXME: Type cloning is horribly inefficient and is hapenning all over `analyzing` step
+// Have to find an ergonomic way to use them with indices or references
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     UInt8,
@@ -52,10 +54,11 @@ pub enum Type {
     Float32,
     Boolean,
     Ptr(Box<Type>),
+    Struct {
+        fields: HashMap<String, Type>
+    },
     #[default]
     Void,
-    // For later :)
-    // Struct(TypeIndex)
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +107,7 @@ impl Type {
             Boolean => 1,
             Ptr(_) => 8,
             Void => 0,
+            Struct { fields } => fields.values().map(Type::size).sum()
         }
     }
 

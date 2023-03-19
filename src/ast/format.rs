@@ -65,8 +65,12 @@ impl Display for Ast {
                 let base = format!("{PURPLE}LOOP");
                 ( base, Some(vec![format!("{body}")]) )
             }
-            Node::FuncDef { name, body, .. } => ( format!("{BLUE}DEFUNC {name}"), Some(vec![format!("{body}")]) ),
-            Node::TypeAlias { lhs, rhs } => ( format!("{WHITE}TYPE ALIAS {CYAN}{rhs:?}{WHITE} to {GREEN}{lhs}"), None )
+            Node::FuncDef { name, body, .. } => ( format!("{PURPLE}DEF FUNC {BLUE}{name}"), Some(vec![format!("{body}")]) ),
+            Node::TypeAlias { lhs, rhs } => ( format!("{WHITE}TYPE ALIAS {CYAN}{rhs:?}{WHITE} to {GREEN}{lhs}"), None ),
+            Node::StructDef { name, fields } => {
+                let fields = fields.iter().map(|(name, ty)| format!("{name}: {CYAN}{ty:?}\n")).collect();
+                ( format!("{PURPLE}DEF STRUCT{WHITE} {name}"), Some(fields) )
+            }
         };
 
         let ty = self.get_type();
