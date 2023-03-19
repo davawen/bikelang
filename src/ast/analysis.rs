@@ -101,6 +101,8 @@ pub enum AnalysisError {
     WrongArgumentNumber(String, usize, usize),
     #[error("Number {0} too big for storage in {1:?}.")]
     NumberTooBig(i64, Type),
+    #[error("Redefinition of type {0}")]
+    TypeRedefinition(String)
 }
 
 impl Function {
@@ -136,6 +138,26 @@ impl Function {
         );
 
         app.function_bodies[body].definition = definition;
+
+        Ok(())
+    }
+}
+
+impl Type {
+    fn is_declaration(node: &Node) -> bool {
+        matches!(node, Node::TypeAlias { .. })
+    }
+
+    fn insert(app: &mut App, definition: Ast) -> Result<()> {
+        let Node::TypeAlias { lhs, rhs } = definition.node else { unreachable!() };
+
+        let rhs = Type::from_node(&rhs, &app.types)?;
+
+        if app.types.types.contains_key(&lhs) {
+            return Err(AnalysisError::TypeRedefinition(lhs)).at(definition.bounds);
+        }
+
+        app.types.insert(lhs, rhs);
 
         Ok(())
     }
@@ -361,8 +383,8 @@ impl Ast {
                 Ok(Type::Void.into())
             }
             Node::Empty => Ok(Type::Void.into()),
-            Node::FuncDef { .. } => {
-                Err(AnalysisError::WrongNodeType("something that isn't a function definition what the fuck", self.node.clone())).at_ast(self)
+            Node::FuncDef { .. } | Node::TypeAlias { .. } => {
+                Err(AnalysisError::WrongNodeType("node only available at global scope", self.node.clone())).at_ast(self)
             }
         }
     }
@@ -379,7 +401,7 @@ impl Ast {
             Node::BoolLiteral(_) => &Type::Boolean,
             Node::StringLiteral(_) => return Type::string(),
             Node::If { ty, .. } => ty,
-            Node::Statement(..) | Node::FuncDef { .. } | Node::Loop { .. }
+            Node::Statement(..) | Node::FuncDef { .. } | Node::TypeAlias { .. } | Node::Loop { .. }
                 | Node::Return(..) | Node::Break | Node::Intrisic(..) | Node::Empty
                 | Node::Definition { .. } => &Type::Void
         }.clone()
@@ -424,9 +446,17 @@ impl App {
     }
 
     pub fn insert_declarations(&mut self, root: Ast) -> Result<()> {
-        let Node::Block { inner: root, ty: _ } = root.node
+        let Node::Block { inner: mut root, ty: _ } = root.node
             else { return Err(AnalysisError::WrongNodeType("A list of top-level statements", root.node.clone())).at_ast(&root) };
 
+        // Go over every type declaration first
+        for idx in 0..root.len() {
+            if Type::is_declaration(&root[idx].node) {
+                Type::insert(self, root.swap_remove(idx))?;
+            }
+        }
+
+        // Then do functions
         for statement in root {
             if Function::is_declaration(&statement.node) {
                 Function::insert(self, statement)?;

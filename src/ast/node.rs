@@ -11,6 +11,10 @@ pub enum Node {
         return_type: Ast<TypeNode>,
         body: Box<Ast>,
     },
+    TypeAlias {
+        lhs: String,
+        rhs: Ast<TypeNode>
+    },
     Call {
         name: String,
         argument_list: Vec<Ast>,

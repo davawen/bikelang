@@ -9,7 +9,7 @@ mod format;
 
 pub use node::*;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Ast<T = Node> {
     pub node: T,
     pub bounds: Bounds
@@ -42,5 +42,11 @@ impl<T> Ast<T> {
     pub fn extend(self, bounds: Bounds) -> Self {
         self.bounds.extend(bounds);
         self
+    }
+}
+
+impl<T: std::fmt::Debug> std::fmt::Debug for Ast<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.node.fmt(f)
     }
 }

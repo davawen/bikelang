@@ -48,7 +48,8 @@ pub enum Keyword {
     Break,
     Return,
     True,
-    False
+    False,
+    TypeKeyword
 }
 
 impl FromStr for Keyword {
@@ -64,6 +65,7 @@ impl FromStr for Keyword {
             "return" => Keyword::Return,
             "true" => Keyword::True,
             "false" => Keyword::False,
+            "type" => Keyword::TypeKeyword,
             _ => return Err(())
         };
 
@@ -257,6 +259,15 @@ impl Lexer {
             Err(AstError::ExpectedToken(tok, n.token)).at(n.bounds)
         }
     }
+
+    // pub fn expect_fn<F: FnOnce(&Token) -> bool>(&mut self, f: F) -> Result<Item> {
+    //     let n = self.next();
+    //     if f(&n.token) {
+    //         Ok(n)
+    //     } else {
+    //         Err(AstError::UnexpectedToken("at expect_fn", n.token)).at(n.bounds)
+    //     }
+    // }
 
     pub fn peek(&self) -> &Item {
         self.tokens.last().unwrap_or(&Item::EOF)

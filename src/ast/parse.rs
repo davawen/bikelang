@@ -117,6 +117,20 @@ impl Mode for ExpressionMode {
                             }
                         )
                     }
+                    TypeKeyword => {
+                        let t = lexer.next();
+                        let Token::Word(lhs) = t.token
+                            else { return Err(AstError::ExpectedToken(Token::Word("".to_owned()), t.token)).at(t.bounds) };
+
+                        lexer.expect(Token::Op(Operation::Assignment))?;
+                        let rhs = pratt(&TypeMode, lexer, 0)?;
+                        lexer.expect(Token::Semicolon)?;
+
+                        Ast::new(
+                            item.bounds.with_end_of(rhs.bounds),
+                            Node::TypeAlias { lhs, rhs }
+                        )
+                    }
                     If => {
                         let condition = Box::new(pratt(self, lexer, 1)?);
                         let body = Box::new(parse_block(lexer.next(), lexer)?);
@@ -257,7 +271,7 @@ impl Mode for TypeMode {
         // > to close type conversions
         // stop on left-binding word = declaration
         let out = match &item.token {
-            Op(Operation::Greater) | Comma | Word(_) | Brace(Dir::Left) => 0,
+            Op(Operation::Greater) | Comma | Word(_) | Brace(Dir::Left) | Semicolon => 0,
             token => return Err(AstError::UnexpectedToken("cannot use token in type declaration", token.clone())).at_item(item)
         };
         Ok(out)

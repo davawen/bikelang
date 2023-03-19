@@ -16,10 +16,10 @@ impl Display for Ast {
                 let b = if *b { "TRUE" } else { "FALSE" };
                 ( format!("{ORANGE}{b}"), None )
             }
-            Node::Definition { ty: _, typename, name } => ( format!("DEF {name}: {CYAN}{typename:?}"), None ),
+            Node::Definition { ty: _, typename, name } => ( format!("DEF {name}: {CYAN}{typename:?}{WHITE}"), None ),
             Node::Break => ( "BREAK".to_string(), None ),
             Node::Empty => ( "EMPTY".to_string(), None ),
-            Node::Convert(box expr, typename, _) => ( format!("CONVERT TO {typename:?}"), Some(vec![format!("{expr}")]) ),
+            Node::Convert(box expr, typename, _) => ( format!("{PURPLE}CONVERT{WHITE} TO {CYAN}{typename:?}{WHITE}"), Some(vec![format!("{expr}")]) ),
             Node::Return(box expr, ..) => ( format!("{PURPLE}RETURN"), Some(vec![format!("{expr}")]) ),
             Node::Statement(inner) => {
                 ( "STATEMENT".to_string(), Some(vec![format!("{inner}")]) )
@@ -57,7 +57,7 @@ impl Display for Ast {
                 let condition = format!("CONDITION {condition}");
                 let body = format!("BODY {body}");
                 let else_body = if let Some(else_body) = else_body {
-                    format!("ELSE {else_body}")
+                    format!("{PURPLE}ELSE{WHITE} {else_body}")
                 } else { String::new() };
                 ( base, Some(vec![condition, body, else_body]) )
             }
@@ -65,7 +65,8 @@ impl Display for Ast {
                 let base = format!("{PURPLE}LOOP");
                 ( base, Some(vec![format!("{body}")]) )
             }
-            Node::FuncDef { name, body, .. } => ( format!("\x1b[34mDEFUNC {name}"), Some(vec![format!("{body}")]) ),
+            Node::FuncDef { name, body, .. } => ( format!("{BLUE}DEFUNC {name}"), Some(vec![format!("{body}")]) ),
+            Node::TypeAlias { lhs, rhs } => ( format!("{WHITE}TYPE ALIAS {CYAN}{rhs:?}{WHITE} to {GREEN}{lhs}"), None )
         };
 
         let ty = self.get_type();

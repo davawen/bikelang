@@ -1,7 +1,15 @@
-func main() {
-	let int test = 10;
+func problem() -> int {
+	let i32 x = 12;
+	let *i32 x = &x;
+	let **i32 x = &x;
 
-	print#("test is: ", test);
+	return x;
 }
 
-// type int = i32;
+func main() {
+	let int test = problem();
+
+	print#("test is: ", **test);
+}
+
+type int = **i32;
