@@ -92,6 +92,7 @@ pub enum Operation {
     LogicalXor,
 
     AddressOf,
+    Dot,
 
     Plus,
     Minus,
@@ -212,6 +213,7 @@ impl Lexer {
                             '=', Some(Token::Op(Operation::LesserOrEquals))
                         ),
                         '&' => then_or!(Some(Token::Op(Operation::AddressOf)), '&', Some(Token::Op(Operation::LogicalAnd))),
+                        '.' => Some(Token::Op(Operation::Dot)),
                         '|' => then_or!(None, '|', Some(Token::Op(Operation::LogicalOr))),
                         '^' => then_or!(None, '^', Some(Token::Op(Operation::LogicalXor))),
                         '+' => Some(Token::Op(Operation::Plus)),

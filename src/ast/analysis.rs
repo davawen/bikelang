@@ -5,8 +5,8 @@ use itertools::Itertools;
 use thiserror::Error;
 use derive_more::{Deref, DerefMut};
 
-use crate::{utility::{PushIndex, Transmit, Bounds}, typed::{TypeError, Type, SuperType, TypeDescriptor, TypeHolder}, super_type_or, error::{Result, ToCompilerError}, scope::{ScopeTrait, ScopeStack}, };
-use super::{Ast, node::{Node, Intrisic, BinaryOperation, UnaryOperation}, TypeNode};
+use crate::{utility::{PushIndex, Transmit}, typed::{TypeError, Type, SuperType, TypeDescriptor, TypeHolder, Field}, super_type_or, error::{Result, ToCompilerError}, scope::{ScopeTrait, ScopeStack}, };
+use super::{Ast, node::{Node, Intrisic, BinaryOperation, UnaryOperation}};
 
 pub type FunctionIndex = usize;
 pub type FunctionBodyIndex = usize;
@@ -102,7 +102,9 @@ pub enum AnalysisError {
     #[error("Number {0} too big for storage in {1:?}.")]
     NumberTooBig(i64, Type),
     #[error("Redefinition of type {0}")]
-    TypeRedefinition(String)
+    TypeRedefinition(String),
+    #[error("Unknown field {0} on struct {1:?}")]
+    UnknownField(String, Type)
 }
 
 impl Function {
@@ -163,11 +165,21 @@ impl Type {
                 if app.types.types.contains_key(&name) {
                     return Err(AnalysisError::TypeRedefinition(name)).at(definition.bounds);
                 }
+                let mut offset = 0;
+
                 let fields = fields.into_iter()
-                    .map(|(name, ty)| Ok((name, Type::from_node(&ty, &app.types)?)))
+                    .map(|(name, ty)| {
+                        let field = Field {
+                            ty: Type::from_node(&ty, &app.types)?,
+                            offset
+                        };
+                        offset += field.ty.size();
+
+                        Ok((name, field))
+                    })
                     .collect::<Result<_>>()?;
 
-                app.types.insert(name, Type::Struct { fields });
+                app.types.insert(name, Type::Struct { fields, size: offset });
                 Ok(())
             },
             _ => unreachable!()
@@ -327,6 +339,22 @@ impl Ast {
                         left.expect(Type::Boolean.into(), "logical operations only apply to booleans").at_ast(lhs)?;
                         right.expect(Type::Boolean.into(), "logical operations only apply to booleans").at_ast(rhs)?
                     }
+                    MemberAccess => {
+                        let left = lhs.set_type(app, definition, scopes, None)?;
+                        let Type::Struct { fields, size: _ } = &left.ty else {
+                            return Err(TypeError::Mismatched("can only access fields on structs", SuperType::Struct, left.ty).at(lhs.bounds));
+                        };
+
+                        let Node::Identifier(field, _) = &rhs.node else { 
+                            return Err(AnalysisError::WrongNodeType("expected a field name", rhs.node.clone())).at(rhs.bounds) 
+                        };
+
+                        if let Some(field) = fields.get(field) {
+                            field.ty.clone().addressable()
+                        } else {
+                            return Err(AnalysisError::UnknownField(field.clone(), left.ty.clone())).at(rhs.bounds);
+                        }
+                    }
                     Assignment => unreachable!()
                 };
                 *ty = descriptor.ty.clone();
@@ -401,6 +429,7 @@ impl Ast {
         }
     }
 
+    #[inline]
     pub fn get_type(&self) -> Type {
         match &self.node {
             Node::Call { return_type, .. } => return_type,

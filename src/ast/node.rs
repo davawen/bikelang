@@ -101,6 +101,8 @@ pub enum BinaryOperation {
     LogicalOr,
     LogicalXor,
 
+    MemberAccess,
+
     Add,
     Sub,
     Mul,

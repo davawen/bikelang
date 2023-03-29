@@ -41,7 +41,15 @@ impl TypeHolder {
     }
 }
 
-// FIXME: Type cloning is horribly inefficient and is hapenning all over `analyzing` step
+/// Field of a struct
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Field {
+    pub ty: Type,
+    /// Offset in bytes from the start of the struct
+    pub offset: u32
+}
+
+// FIXME: Type cloning is horribly inefficient and is happening all over `analyzing` step
 // Have to find an ergonomic way to use them with indices or references
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -55,7 +63,9 @@ pub enum Type {
     Boolean,
     Ptr(Box<Type>),
     Struct {
-        fields: HashMap<String, Type>
+        fields: HashMap<String, Field>,
+        /// Size in bytes of the struct
+        size: u32
     },
     #[default]
     Void,
@@ -107,7 +117,7 @@ impl Type {
             Boolean => 1,
             Ptr(_) => 8,
             Void => 0,
-            Struct { fields } => fields.values().map(Type::size).sum()
+            &Struct { size, fields: _ } => size
         }
     }
 
@@ -203,6 +213,7 @@ pub enum SuperType {
     Float,
     Number,
     Ptr,
+    Struct
 }
 
 impl From<Type> for SuperType {
@@ -233,6 +244,7 @@ impl SuperType {
             Float => matches!(ty, Type::Float32),
             Number => Integer.verify(ty) || Float.verify(ty),
             Ptr => matches!(ty, Type::Ptr(_)),
+            Struct => matches!(ty, Type::Struct { .. })
         }
     }
 

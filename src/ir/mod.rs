@@ -27,7 +27,8 @@ struct Function {
     name: String,
 
     /// Total space the function's variables take on the stack
-    stack_offset: u32,
+    /// Always negative
+    stack_offset: i32,
 
     /// Used to index into the first scope(which holds all the arguments)
     return_variable: Option<VariableKey>,

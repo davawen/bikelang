@@ -17,18 +17,18 @@ pub struct VariableOffset {
     /// The size of this variable in bytes
     pub size: u32,
     /// The offset of this variable from the stack base
-    pub offset: u32,
-    /// Wether this variable is an argument (is it stored in this stack frame or in the parent one)
-    pub argument: bool
+    /// Negative means the variable is in the current stack frame, otherwise it's in the parent one
+    pub offset: i32,
 }
 
 #[derive(Default, Debug)]
 pub struct Scope {
     pub variables: SlotMap<VariableKey, VariableOffset>,
     pub named_variables: HashMap<String, VariableKey>,
-    pub offset: u32,
+    /// Always negative
+    pub offset: i32,
     /// The maximum amount of space reserved by the scope, may be greater than `offset` if variables are shadowed
-    pub max_offset: u32,
+    pub max_offset: i32,
     pub kind: ScopeKind
 }
 
@@ -68,11 +68,11 @@ impl ScopeTrait for Scope {
             // if variable was shadowed right next to itself -> change the top of the stack however you want
             // let _ a;
             // let _ a;
-            if self.offset-shadowed.size == shadowed.offset {
-                self.offset -= shadowed.size;
-                var.offset = self.offset;
+            if self.offset == shadowed.offset {
+                self.offset += shadowed.size as i32;
+                self.offset -= var.size as i32;
 
-                self.offset += var.size;
+                var.offset = self.offset;
             }
             // if variable is shadowed later, but fits in the already allocated space
             // let i32 a;
@@ -86,13 +86,13 @@ impl ScopeTrait for Scope {
             // let _ b;
             // let i32 a;
             else {
-                self.offset += var.size;
+                self.offset -= var.size as i32;
             }
             // of course the best would just be to always put the space for the bigger variable, but that's a bit harder
         } else {
-            self.offset += var.size;
+            self.offset -= var.size as i32;
         }
-        self.max_offset = self.max_offset.max(self.offset);
+        self.max_offset = self.max_offset.min(self.offset);
 
         let key = self.variables.insert(var);
         self.named_variables.insert(name, key);

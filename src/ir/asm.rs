@@ -12,17 +12,19 @@ fn word_size(size: u32) -> &'static str {
     }
 }
 
+fn variable_operand_without_size(_func: &Function, var: VariableOffset) -> String {
+    fmtools::format!(
+        "[rbp"
+        {var.offset:+}
+        "]"
+    )
+}
+
 fn variable_operand(_func: &Function, var: VariableOffset) -> String {
     // let var = &func.scopes[key.0].variables[key.1];
     fmtools::format!(
         {word_size(var.size)} " "
-        "[rbp"
-        if var.argument {
-            '+' {var.offset}
-        } else {
-            '-' {var.offset + var.size}
-        }
-        "]"
+        {variable_operand_without_size(_func, var)}
     )
 }
 
@@ -62,8 +64,6 @@ impl Register {
     }
 }
 
-
-// Addresses use r8 as an intermediary register
 impl Address {
     fn as_operand(&self, func: &Function) -> String {
         match self {
@@ -168,7 +168,7 @@ impl Arithmetic {
             }
             &AddressOf(reg, var) => {
                 let reg = reg.as_str();
-                (reg, format!("lea {reg}, {}\n", variable_operand(func, var)))
+                (reg, format!("lea {reg}, {}\n", variable_operand_without_size(func, var)))
             }
         }
     }
@@ -354,6 +354,10 @@ impl Instruction {
 
 impl Function {
     fn generate_asm(&self, ir: &Ir) -> String {
+        if self.stack_offset.is_positive() {
+            panic!("positive stack offset?");
+        }
+
         let mut out = format!(
 "{}:
     ; enter stack frame
@@ -362,7 +366,7 @@ impl Function {
     sub rsp, {}
 \n", 
             self.name,
-            self.stack_offset
+            self.stack_offset.abs()
         );
 
         for (idx, ins) in self.instructions.iter().enumerate() {

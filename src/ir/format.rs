@@ -5,13 +5,7 @@ use crate::utility::color::*;
 
 fn format_variable(var: &VariableOffset) -> String {
     fmtools::format!{
-        "( " 
-        if var.argument {
-            "BASE + "{var.offset}
-        } else {
-            "BASE - "{var.offset + var.size}
-        }
-        " )"
+        "( BASE "{var.offset:+}" )"
     }
     // fmtools::format!(
     //     "(" {var:?} " "

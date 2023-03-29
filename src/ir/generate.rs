@@ -2,7 +2,7 @@ use std::default::default;
 
 use itertools::Itertools;
 
-use crate::{ast::{self, analysis, BinaryOperation, UnaryOperation}, typed::{Type, SuperType}, scope::{ScopeTrait, ScopeStack}};
+use crate::{ast::{self, analysis, BinaryOperation, UnaryOperation}, typed::{Type, SuperType, Field}, scope::{ScopeTrait, ScopeStack}};
 
 use super::{*, scope::{VariableOffset, ScopeKind}};
 
@@ -65,12 +65,54 @@ fn insert_declaration(scopes: &mut ScopeStack<Scope>, name: String, ty: Type) ->
     let size = ty.size();
     scopes.insert(name, VariableOffset {
         size,
-        offset: scopes.top().offset,
-        argument: false
+        offset: scopes.top().offset - size as i32,
     })
 }
 
+fn get_field<'a>(lhs: &'a ast::Ast, rhs: &ast::Ast) -> Field {
+    let Type::Struct { mut fields, .. } = lhs.get_type() else {
+        unreachable!("Type checking should ensure member access cannot be done on something other than a struct")
+    };
+    let ast::Node::Identifier(field, _) = &rhs.node else {
+        unreachable!("Type checking should ensure member access isn't done with something other than an identifier")
+    };
+    fields.remove(field).unwrap()
+}
+
 impl Function {
+    fn get_address(&mut self, ir: &mut Ir, app: &analysis::App, scopes: &mut ScopeStack<Scope>, ast: ast::Ast) -> Address {
+        match ast.node {
+            ast::Node::Definition { name, ty, typename: _ } => {
+                let var = insert_declaration(scopes, name, ty);
+                scopes.get_index(var).into()
+            }
+            ast::Node::Identifier(var, _) => {
+                let var = scopes.get(&var).unwrap();
+                var.into()
+            }
+            ast::Node::Expr { op: BinaryOperation::MemberAccess, ty, box lhs, box rhs } => {
+                let field = get_field(&lhs, &rhs);
+
+                let lhs = self.get_address(ir, app, scopes, lhs);
+
+                match lhs {
+                    Address::Variable(var) => {
+                        VariableOffset {
+                            size: field.ty.size(),
+                            offset: var.offset + field.offset as i32
+                        }.into()
+                    },
+                    Address::Ptr(_, _) => todo!("Add offset to pointer")
+                }
+            }
+            ast::Node::UnaryExpr { op: UnaryOperation::Deref, ty, value: var, .. } => {
+                let var = self.fold_node(ir, app, scopes, *var);
+                Address::Ptr(var, ty.size())
+            }
+            _ => panic!("Cannot assign to:\n{ast:#?}"),
+        }
+    }
+
     /// Invariant: app's function_bodies can't be used!
     fn fold_node(&mut self, ir: &mut Ir, app: &analysis::App, scopes: &mut ScopeStack<Scope>, ast: ast::Ast) -> Value {
         match ast.node {
@@ -83,21 +125,7 @@ impl Function {
                 // fold rhs first before parsing definitions
                 let rhs = self.fold_node(ir, app, scopes, rhs);
 
-                let address = match lhs.node {
-                    ast::Node::Definition { name, ty, typename: _ } => {
-                        let var = insert_declaration(scopes, name, ty);
-                        scopes.get_index(var).into()
-                    }
-                    ast::Node::Identifier(var, _) => {
-                        let var = scopes.get(&var).unwrap();
-                        var.into()
-                    }
-                    ast::Node::UnaryExpr { op: UnaryOperation::Deref, ty, value: var, .. } => {
-                        let var = self.fold_node(ir, app, scopes, *var);
-                        Address::Ptr(var, ty.size())
-                    }
-                    _ => unreachable!("Cannot assign to {lhs:?}"),
-                };
+                let address = self.get_address(ir, app, scopes, lhs);
 
                 rhs.free_register(ir);
                 address.free_register(ir);
@@ -139,6 +167,13 @@ impl Function {
 
                 self.instructions.push(Instruction::StoreOperation(op));
                 value
+            }
+            ast::Node::Expr { op: BinaryOperation::MemberAccess, ty, box lhs, box rhs } => {
+                let field = get_field(&lhs, &rhs);
+
+
+
+                todo!()
             }
             ast::Node::Expr { op, ty, box lhs, box rhs } => {
                 let lhs = self.fold_node(ir, app, scopes, lhs);
@@ -364,7 +399,7 @@ impl Function {
                 } else { Value::NoValue };
 
                 // get maximum stack offset
-                self.stack_offset = self.stack_offset.max(scopes.top().max_offset);
+                self.stack_offset = self.stack_offset.min(scopes.top().max_offset);
                 scopes.pop();
 
                 out
@@ -404,32 +439,35 @@ impl Function {
     }
 
     fn generate_ir(&mut self, ir: &mut Ir, app: &analysis::App, definition: &analysis::Function, body: analysis::FunctionBody) {
-        let mut parameter_scope = Scope { offset: 16, ..default() };
+        let mut parameter_scope = Scope::default();
+        let mut offset = 16;
 
         for (name, ty) in &definition.parameters {
+            let size = ty.size();
             parameter_scope.insert(name.clone(), VariableOffset {
-                size: ty.size(),
-                offset: parameter_scope.offset,
-                argument: true
+                size,
+                offset
             });
+            offset += size as i32;
         }
         
         let return_size = definition.return_type.size();
         self.return_variable = if return_size > 0 {
             let r = parameter_scope.variables.insert( VariableOffset { 
-                size: return_size, offset: parameter_scope.offset, argument: true 
+                size: return_size, offset
             });
             Some(r)
         } else { None };
 
         parameter_scope.offset = 0; // don't count parameters in the required stack offset
+        parameter_scope.max_offset = 0;
 
         let mut stack = ScopeStack::from_top(parameter_scope);
 
         for node in body.body {
             self.fold_node(ir, app, &mut stack, node);
         }
-        self.stack_offset = self.stack_offset.max(stack.top().offset);
+        self.stack_offset = self.stack_offset.min(stack.top().max_offset);
 
         self.instructions.push(Instruction::Ret);
     }

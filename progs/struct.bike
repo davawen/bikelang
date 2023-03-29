@@ -1,12 +1,14 @@
 struct Simple {
 	i32 a,
-	i32 b
+	i8 b
 }
 
 func main() {
-	let Simple b;
-	let *i32 a_field = <*i32><u64>&b;
-	// b.a = 10; member acess isn't defined yet
+	let Simple obj;
+	let *i32 a_field = <*i32><u64>&obj;
+	let *i32 b_field = <*i32>(<u64>&obj + <u64>4);
+	obj.a = 256;
+	obj.b = 10;
 
-	print#("a is: ", *a_field, "\n");
+	print#("a is: ", *a_field, " == obj.a", ", b is: ", *b_field, " == obj.b",  "\n");
 }

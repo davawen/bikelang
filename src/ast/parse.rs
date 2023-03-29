@@ -26,6 +26,7 @@ impl Mode for ExpressionMode {
                 Equals | NotEquals | Greater | GreaterOrEquals | Lesser | LesserOrEquals => 30,
                 Plus | Minus => 40,
                 Times | Div | Modulus => 50,
+                Dot => 81, // left associative
                 Exclamation | AddressOf => return Err(AstError::WrongOperation(*op, "as an infix operator")).at_item(item) 
             }
             Paren(Dir::Left) => 70, // operator ()
@@ -231,6 +232,7 @@ impl Mode for ExpressionMode {
                     Times           => (BinaryOperation::Mul, 51),
                     Div             => (BinaryOperation::Div, 51),
                     Modulus         => (BinaryOperation::Modulus, 51),
+                    Dot             => (BinaryOperation::MemberAccess, 80),
                     Exclamation | AddressOf => unreachable!() // error emitted in left_binding_power()
                 };
 
