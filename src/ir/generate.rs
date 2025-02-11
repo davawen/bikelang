@@ -1,5 +1,3 @@
-use std::default::default;
-
 use itertools::Itertools;
 
 use crate::{ast::{self, analysis, BinaryOperation, UnaryOperation}, typed::{Type, SuperType, Field}, scope::{ScopeTrait, ScopeStack}};

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, default::default};
+use std::collections::HashMap;
 
 use slotmap::SlotMap;
 
@@ -46,7 +46,7 @@ impl Scope {
         Self {
             offset: parent.offset,
             kind,
-            ..default()
+            ..Default::default()
         }
     }
 }
